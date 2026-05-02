@@ -1,0 +1,23 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+
+# Anchor build artifacts
+.anchor/
+dist/
+
+# Node / React
+node_modules/
+app/node_modules/
+app/build/
+app/.env.local
+
+# Solana keypairs (never commit)
+*.json
+!package.json
+!app/package.json
+!tsconfig.json
+
+# OS
+.DS_Store
+Thumbs.db
