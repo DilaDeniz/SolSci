@@ -2,10 +2,10 @@ import React, { useCallback, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-import * as anchor from "@coral-xyz/anchor";
+import { AnchorProvider, Program, Idl } from "@coral-xyz/anchor";
+import idl from "../idl/solsci.json";
 
-// Replace with deployed program ID after `anchor deploy`
-const PROGRAM_ID = new PublicKey("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+const PROGRAM_ID = new PublicKey((idl as any).address);
 
 interface Certificate {
   pda: string;
@@ -29,8 +29,6 @@ export default function Dashboard() {
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // ── Hash file in-browser using Web Crypto ──────────────────────────────────
-
   async function hashFile(f: File): Promise<Uint8Array> {
     const buf = await f.arrayBuffer();
     const digest = await crypto.subtle.digest("SHA-256", buf);
@@ -44,7 +42,6 @@ export default function Dashboard() {
     setCertificate(null);
     setError("");
     setStatus("Hashing file…");
-
     try {
       const bytes = await hashFile(f);
       const hex = Array.from(bytes)
@@ -68,30 +65,19 @@ export default function Dashboard() {
     [handleFileSelect]
   );
 
-  // ── Register on Solana ─────────────────────────────────────────────────────
-
   async function registerDiscovery() {
     if (!wallet.publicKey || !wallet.signTransaction || !hashBytes || !file) return;
     setError("");
     setStatus("Building transaction…");
 
     try {
-      const provider = new anchor.AnchorProvider(
+      const provider = new AnchorProvider(
         connection,
-        wallet as anchor.Wallet,
+        wallet as any,
         { commitment: "confirmed" }
       );
-      anchor.setProvider(provider);
 
-      // Derive the PDA
-      const [discoveryPDA] = PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("discovery"),
-          wallet.publicKey.toBuffer(),
-          Buffer.from(hashBytes),
-        ],
-        PROGRAM_ID
-      );
+      const program = new Program(idl as Idl, provider);
 
       const metadata = JSON.stringify({
         tool: "BioFastq-A",
@@ -101,30 +87,38 @@ export default function Dashboard() {
         file_name: file.name,
       });
 
-      if (metadata.length > 512) {
-        setError("Metadata too long (> 512 bytes). Shorten analysis type.");
+      if (new TextEncoder().encode(metadata).length > 512) {
+        setError("Metadata too long (> 512 bytes). Shorten analysis type or file name.");
         return;
       }
 
-      // Build instruction data manually (no IDL needed in dev)
-      // discriminator for register_discovery = sha256("global:register_discovery")[0..8]
-      const idlHashBytes = Array.from(hashBytes) as number[];
+      const [discoveryPDA] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("discovery"),
+          wallet.publicKey.toBuffer(),
+          Buffer.from(hashBytes),
+        ],
+        PROGRAM_ID
+      );
 
       setStatus("Awaiting wallet approval…");
 
-      // Use anchor Program if IDL is available, otherwise show placeholder
-      setStatus("Transaction submitted! Awaiting confirmation…");
+      const txSig = await (program.methods as any)
+        .registerDiscovery(Array.from(hashBytes), metadata)
+        .accounts({
+          researcher: wallet.publicKey,
+          discoveryRecord: discoveryPDA,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc({ commitment: "confirmed" });
 
-      // Simulate certificate for demo when program not yet deployed
-      const fakeSig = `${Date.now().toString(36)}${Math.random()
-        .toString(36)
-        .slice(2)}`;
+      const record = await (program.account as any).discoveryRecord.fetch(discoveryPDA);
 
       setCertificate({
         pda: discoveryPDA.toBase58(),
-        txSig: fakeSig,
-        fileHash: fileHash,
-        timestamp: Math.floor(Date.now() / 1000),
+        txSig,
+        fileHash,
+        timestamp: record.timestamp.toNumber(),
         metadata,
       });
       setStatus("Discovery registered successfully.");
@@ -133,8 +127,6 @@ export default function Dashboard() {
       setStatus("");
     }
   }
-
-  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="solsci-app">
@@ -147,7 +139,6 @@ export default function Dashboard() {
         <WalletMultiButton />
       </div>
 
-      {/* File upload */}
       <div className="card">
         <h2>1. Upload Research Output</h2>
         <div
@@ -165,15 +156,9 @@ export default function Dashboard() {
             onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
           />
         </div>
-
-        {fileHash && (
-          <div className="hash-display">
-            SHA-256: {fileHash}
-          </div>
-        )}
+        {fileHash && <div className="hash-display">SHA-256: {fileHash}</div>}
       </div>
 
-      {/* Metadata */}
       {file && (
         <div className="card">
           <h2>2. Analysis Metadata</h2>
@@ -199,7 +184,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Register */}
       {hashBytes && (
         <div className="card">
           <h2>3. Register Discovery</h2>
@@ -215,7 +199,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Certificate */}
       {certificate && (
         <div className="card">
           <h2>Certificate of Discovery</h2>
@@ -238,9 +221,7 @@ export default function Dashboard() {
             <p className="value">{certificate.fileHash}</p>
 
             <p className="label">Timestamp</p>
-            <p className="value">
-              {new Date(certificate.timestamp * 1000).toUTCString()}
-            </p>
+            <p className="value">{new Date(certificate.timestamp * 1000).toUTCString()}</p>
 
             <p className="label">Metadata</p>
             <p className="value">{certificate.metadata}</p>
