@@ -1,0 +1,19 @@
+[package]
+name = "solsci"
+version = "0.1.0"
+edition = "2021"
+description = "SolSci — on-chain scientific discovery verification protocol"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "solsci"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.30.1"
