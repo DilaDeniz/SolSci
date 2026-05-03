@@ -193,4 +193,4 @@ solana airdrop 2
 
 ## License
 
-MIT
+Apache 2.0
