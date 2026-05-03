@@ -1,200 +1,139 @@
+mod cli;
+mod hash;
+mod metadata;
+mod solana;
+
 use anyhow::{Context, Result};
 use clap::Parser;
-use sha2::{Digest, Sha256};
-use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signature::{read_keypair_file, Signer},
-    system_program,
-    transaction::Transaction,
-};
-use std::path::PathBuf;
-
-// ── CLI ────────────────────────────────────────────────────────────────────────
-
-#[derive(Parser, Debug)]
-#[command(
-    name = "solsci-engine",
-    about = "Hash a BioFastq-A output file and register the proof on Solana"
-)]
-struct Cli {
-    #[arg(short, long)]
-    file: PathBuf,
-
-    #[arg(short, long, default_value = "genomic_analysis")]
-    analysis_type: String,
-
-    #[arg(long, default_value = "BioFastq-A/1.0.0")]
-    tool_version: String,
-
-    #[arg(long, default_value = "https://api.devnet.solana.com")]
-    rpc_url: String,
-
-    #[arg(long, default_value = "~/.config/solana/id.json")]
-    keypair: PathBuf,
-
-    /// Deployed SolSci program ID
-    #[arg(long)]
-    program_id: String,
-
-    #[arg(long, default_value_t = false)]
-    dry_run: bool,
-}
-
-// ── Metadata ──────────────────────────────────────────────────────────────────
-
-#[derive(Serialize, Deserialize, Debug)]
-struct DiscoveryMetadata {
-    tool: String,
-    version: String,
-    analysis_type: String,
-    file_size_bytes: u64,
-    file_name: String,
-}
-
-// ── Core pipeline ─────────────────────────────────────────────────────────────
-
-fn hash_file(path: &PathBuf) -> Result<[u8; 32]> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
-    let digest = Sha256::digest(&bytes);
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&digest);
-    Ok(out)
-}
-
-fn build_metadata(cli: &Cli) -> Result<String> {
-    let file_size = std::fs::metadata(&cli.file)
-        .context("Could not stat input file")?
-        .len();
-
-    let file_name = cli
-        .file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_string();
-
-    let (tool, version) = cli
-        .tool_version
-        .split_once('/')
-        .unwrap_or((&cli.tool_version, "unknown"));
-
-    let meta = DiscoveryMetadata {
-        tool: tool.to_string(),
-        version: version.to_string(),
-        analysis_type: cli.analysis_type.clone(),
-        file_size_bytes: file_size,
-        file_name,
-    };
-
-    let json = serde_json::to_string(&meta)?;
-    if json.len() > 512 {
-        anyhow::bail!(
-            "Metadata JSON is {} bytes — exceeds the 512-byte on-chain limit. \
-             Shorten analysis_type or tool_version.",
-            json.len()
-        );
-    }
-    Ok(json)
-}
-
-/// Compute the 8-byte Anchor instruction discriminator: sha256("global:{name}")[0..8]
-fn anchor_discriminator(name: &str) -> [u8; 8] {
-    let hash = Sha256::digest(format!("global:{}", name).as_bytes());
-    hash[..8].try_into().unwrap()
-}
-
-// ── Solana submission ─────────────────────────────────────────────────────────
-
-fn submit_to_solana(cli: &Cli, file_hash: [u8; 32], metadata: &str) -> Result<()> {
-    let keypair_path = shellexpand::tilde(
-        cli.keypair.to_str().unwrap_or("~/.config/solana/id.json"),
-    );
-    let payer = read_keypair_file(keypair_path.as_ref())
-        .map_err(|e| anyhow::anyhow!("Failed to read keypair: {}", e))?;
-
-    let rpc = RpcClient::new(cli.rpc_url.clone());
-
-    let balance = rpc.get_balance(&payer.pubkey())?;
-    println!(
-        "Wallet: {} ({:.4} SOL)",
-        payer.pubkey(),
-        balance as f64 / 1e9
-    );
-    if balance == 0 {
-        anyhow::bail!("Wallet has 0 SOL. Run: solana airdrop 2 --url devnet");
-    }
-
-    let program_id: Pubkey = cli.program_id.parse().context("Invalid program ID")?;
-
-    let (discovery_pda, _bump) = Pubkey::find_program_address(
-        &[b"discovery", payer.pubkey().as_ref(), file_hash.as_ref()],
-        &program_id,
-    );
-    println!("Certificate PDA: {}", discovery_pda);
-
-    // Encode instruction data: discriminator + file_hash (32 bytes) + metadata (u32 len + bytes)
-    let discriminator = anchor_discriminator("register_discovery");
-    let metadata_bytes = metadata.as_bytes();
-    let mut data = Vec::with_capacity(8 + 32 + 4 + metadata_bytes.len());
-    data.extend_from_slice(&discriminator);
-    data.extend_from_slice(&file_hash);
-    data.extend_from_slice(&(metadata_bytes.len() as u32).to_le_bytes());
-    data.extend_from_slice(metadata_bytes);
-
-    let instruction = Instruction {
-        program_id,
-        accounts: vec![
-            AccountMeta::new(payer.pubkey(), true),
-            AccountMeta::new(discovery_pda, false),
-            AccountMeta::new_readonly(system_program::id(), false),
-        ],
-        data,
-    };
-
-    let blockhash = rpc.get_latest_blockhash()?;
-    let tx = Transaction::new_signed_with_payer(
-        &[instruction],
-        Some(&payer.pubkey()),
-        &[&payer],
-        blockhash,
-    );
-
-    let sig = rpc
-        .send_and_confirm_transaction(&tx)
-        .context("Transaction failed — is the program deployed?")?;
-
-    println!("Transaction: {}", sig);
-    println!(
-        "Explorer: https://explorer.solana.com/tx/{}?cluster=devnet",
-        sig
-    );
-    Ok(())
-}
-
-// ── Entry point ───────────────────────────────────────────────────────────────
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = cli::Cli::parse();
+    match cli.command {
+        cli::Command::Register(args) => cmd_register(args),
+        cli::Command::Verify(args)   => cmd_verify(args),
+    }
+}
 
-    println!("SolSci Engine — hashing {}", cli.file.display());
+// ── Commands ──────────────────────────────────────────────────────────────────
 
-    let file_hash = hash_file(&cli.file)?;
-    println!("SHA-256: {}", hex::encode(file_hash));
+fn cmd_register(args: cli::RegisterArgs) -> Result<()> {
+    println!("SolSci — hashing {}", args.file.display());
 
-    let metadata = build_metadata(&cli)?;
-    println!("Metadata: {}", metadata);
+    let file_hash = hash::hash_file(&args.file)?;
+    println!("  SHA-256  : {}", hex::encode(file_hash));
 
-    if cli.dry_run {
+    let meta = metadata::DiscoveryMetadata::from_file(
+        &args.file,
+        &args.tool_version,
+        &args.analysis_type,
+    )?;
+    let metadata_json = meta.to_json()?;
+    println!("  Metadata : {}", metadata_json);
+
+    if args.dry_run {
         println!("[dry-run] Skipping Solana submission.");
         return Ok(());
     }
 
-    println!("Submitting to Solana ({})…", cli.rpc_url);
-    submit_to_solana(&cli, file_hash, &metadata)?;
+    let program_id = args.program_id.parse().context("Invalid --program-id")?;
+    let keypair    = solana::load_keypair(&args.keypair)?;
+    let rpc        = RpcClient::new(args.rpc_url.clone());
+
+    println!("Submitting to {} ...", args.rpc_url);
+    let sig = solana::register(&rpc, &keypair, program_id, file_hash, &metadata_json)?;
+
+    println!("  Signature : {}", sig);
+    println!("  Explorer  : https://explorer.solana.com/tx/{}?cluster=devnet", sig);
 
     Ok(())
+}
+
+fn cmd_verify(args: cli::VerifyArgs) -> Result<()> {
+    let hash_hex = args.hash.trim().to_lowercase();
+    anyhow::ensure!(
+        hash_hex.len() == 64 && hash_hex.chars().all(|c| c.is_ascii_hexdigit()),
+        "--hash must be a 64-character SHA-256 hex string",
+    );
+
+    let file_hash: [u8; 32] = hex::decode(&hash_hex)?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Hash is not 32 bytes"))?;
+
+    let researcher = args.researcher.parse().context("Invalid --researcher pubkey")?;
+    let program_id = args.program_id.parse().context("Invalid --program-id")?;
+    let rpc        = RpcClient::new(args.rpc_url);
+
+    println!("Querying {} ...", args.researcher);
+
+    match solana::fetch_record(&rpc, program_id, researcher, file_hash)? {
+        Some(record) => {
+            println!("  Status     : Verified on-chain");
+            println!("  Researcher : {}", record.researcher);
+            println!("  Hash       : {}", hex::encode(record.file_hash));
+            println!("  Timestamp  : {} (Unix {})",
+                format_unix(record.timestamp),
+                record.timestamp,
+            );
+            println!("  Metadata   : {}", record.metadata);
+        }
+        None => {
+            println!("  Status     : NOT found on-chain");
+        }
+    }
+
+    Ok(())
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Format a Unix timestamp as an ISO-8601 string without pulling in chrono.
+///
+/// Accurate for dates between 1970 and ~2100; good enough for CLI display.
+fn format_unix(ts: i64) -> String {
+    if ts <= 0 {
+        return "1970-01-01T00:00:00Z".to_string();
+    }
+
+    let secs_per_min  = 60u64;
+    let secs_per_hour = 3600u64;
+    let secs_per_day  = 86400u64;
+
+    let mut remaining = ts as u64;
+    let s = remaining % secs_per_min;  remaining /= secs_per_min;
+    let m = remaining % 60;            remaining /= 60;
+    let h = remaining % 24;
+    let mut days = remaining / 24;
+
+    // Days since epoch → Gregorian calendar
+    let (mut year, mut month, mut day) = (1970u32, 1u32, 1u32);
+    loop {
+        let days_in_year = if is_leap(year) { 366 } else { 365 };
+        if days < days_in_year { break; }
+        days -= days_in_year;
+        year += 1;
+    }
+    loop {
+        let dim = days_in_month(month, year);
+        if days < dim as u64 { break; }
+        days -= dim as u64;
+        month += 1;
+    }
+    day += days as u32;
+
+    let _ = secs_per_day; // suppress unused warning
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, h, m, s)
+}
+
+fn is_leap(y: u32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn days_in_month(m: u32, y: u32) -> u32 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11               => 30,
+        2 => if is_leap(y) { 29 } else { 28 },
+        _ => unreachable!(),
+    }
 }
