@@ -1,0 +1,109 @@
+# SolSci — automatic discovery stamping
+#
+# Triggered whenever analysis output files change (push / PR).
+# Also triggerable manually via the GitHub Actions UI.
+#
+# Behaviour:
+#   - No secrets configured  → dry-run (hash + metadata printed, nothing sent)
+#   - SOLANA_KEYPAIR secret set → registers the discovery on-chain
+#
+# Required GitHub secrets (Settings → Secrets and variables → Actions):
+#   SOLANA_KEYPAIR    base64-encoded Solana keypair JSON
+#                     generate: base64 -w0 ~/.config/solana/id.json
+#   SOLSCI_PROGRAM_ID deployed program address (can also be a variable)
+#
+# Optional GitHub variable:
+#   SOLSCI_RPC_URL    defaults to https://api.devnet.solana.com
+
+name: SolSci Discovery Stamp
+
+on:
+  push:
+    paths:
+      - "results/**"
+      - "output/**"
+      - "data/processed/**"
+  pull_request:
+    paths:
+      - "results/**"
+      - "output/**"
+      - "data/processed/**"
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "Path to analysis output file (relative to repo root)"
+        required: true
+      analysis_type:
+        description: "Analysis type label"
+        default: "genomic_analysis"
+      tool_version:
+        description: 'Tool identifier (e.g. "fastp/0.23.4")'
+        default: "BioFastq-A/1.0.0"
+
+jobs:
+  stamp:
+    name: Hash and stamp discovery
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Cache the Cargo registry and compiled engine binary across runs.
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            engine/target
+          key: ${{ runner.os }}-solsci-engine-${{ hashFiles('engine/Cargo.lock', 'engine/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-solsci-engine-
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build solsci-engine
+        run: cargo build --release --manifest-path engine/Cargo.toml
+
+      # Write the keypair to a temp file if the secret is present,
+      # then clean it up regardless of whether the step succeeds.
+      - name: Stamp discovery on Solana
+        env:
+          SOLANA_KEYPAIR:    ${{ secrets.SOLANA_KEYPAIR }}
+          SOLSCI_PROGRAM_ID: ${{ secrets.SOLSCI_PROGRAM_ID || vars.SOLSCI_PROGRAM_ID }}
+          SOLSCI_RPC_URL:    ${{ vars.SOLSCI_RPC_URL || 'https://api.devnet.solana.com' }}
+        run: |
+          FILE="${{ github.event.inputs.file || 'output/result.fastq' }}"
+          ANALYSIS="${{ github.event.inputs.analysis_type || 'genomic_analysis' }}"
+          TOOL="${{ github.event.inputs.tool_version || 'BioFastq-A/1.0.0' }}"
+          ENGINE="./engine/target/release/solsci-engine"
+
+          if [ ! -f "$FILE" ]; then
+            echo "::warning::File '$FILE' not found — skipping stamp."
+            exit 0
+          fi
+
+          if [ -z "$SOLANA_KEYPAIR" ] || [ -z "$SOLSCI_PROGRAM_ID" ]; then
+            echo "::notice::SOLANA_KEYPAIR or SOLSCI_PROGRAM_ID not set — running dry-run."
+            $ENGINE register \
+              --file          "$FILE" \
+              --analysis-type "$ANALYSIS" \
+              --tool-version  "$TOOL" \
+              --program-id    "${SOLSCI_PROGRAM_ID:-Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS}" \
+              --dry-run
+          else
+            KEYPAIR_FILE=$(mktemp /tmp/solsci-XXXXXX.json)
+            echo "$SOLANA_KEYPAIR" | base64 -d > "$KEYPAIR_FILE"
+
+            $ENGINE register \
+              --file          "$FILE" \
+              --analysis-type "$ANALYSIS" \
+              --tool-version  "$TOOL" \
+              --rpc-url       "$SOLSCI_RPC_URL" \
+              --program-id    "$SOLSCI_PROGRAM_ID" \
+              --keypair       "$KEYPAIR_FILE"
+
+            rm -f "$KEYPAIR_FILE"
+          fi

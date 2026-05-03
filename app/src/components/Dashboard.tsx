@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
@@ -19,6 +19,8 @@ const ANALYSIS_TYPES = [
   "genomic_analysis",
 ];
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 interface Certificate {
   pda: string;
   txSig: string;
@@ -35,7 +37,23 @@ interface VerifyResult {
   metadata?: string;
 }
 
-type Tab = "register" | "verify";
+interface FeedEntry {
+  pda: string;
+  researcher: string;
+  fileHash: string;
+  timestamp: number;
+  metadata: string;
+}
+
+type Tab = "register" | "verify" | "feed";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function truncate(s: string, n = 8) {
+  return s.length <= n * 2 + 3 ? s : `${s.slice(0, n)}…${s.slice(-n)}`;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { connection } = useConnection();
@@ -62,7 +80,13 @@ export default function Dashboard() {
   const [verifying, setVerifying] = useState(false);
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Feed state ─────────────────────────────────────────────────────────────
+  const [feed, setFeed] = useState<FeedEntry[]>([]);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedError, setFeedError] = useState("");
+
+  // ── Shared helpers ─────────────────────────────────────────────────────────
+
   async function hashFile(f: File): Promise<Uint8Array> {
     const buf = await f.arrayBuffer();
     return new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
@@ -97,7 +121,13 @@ export default function Dashboard() {
     }
   }
 
+  function metaField(metaStr: string, key: string): string {
+    try { return JSON.parse(metaStr)[key] ?? "—"; }
+    catch { return "—"; }
+  }
+
   // ── Register handlers ──────────────────────────────────────────────────────
+
   const handleFileSelect = useCallback(async (f: File) => {
     setFile(f);
     setFileHash("");
@@ -182,6 +212,7 @@ export default function Dashboard() {
   }
 
   // ── Verify handlers ────────────────────────────────────────────────────────
+
   async function handleVerifyFileSelect(f: File) {
     const bytes = await hashFile(f);
     setVerifyHashInput(bytesToHex(bytes));
@@ -243,7 +274,48 @@ export default function Dashboard() {
     }
   }
 
+  // ── Feed handlers ──────────────────────────────────────────────────────────
+
+  async function loadFeed() {
+    setFeedLoading(true);
+    setFeedError("");
+    try {
+      const provider = new AnchorProvider(
+        connection,
+        wallet.publicKey
+          ? (wallet as any)
+          : { publicKey: PublicKey.default, signTransaction: async (t: any) => t, signAllTransactions: async (t: any) => t },
+        { commitment: "confirmed" }
+      );
+      const program = new Program(idl as Idl, provider);
+
+      const accounts = await (program.account as any).discoveryRecord.all();
+
+      const entries: FeedEntry[] = accounts
+        .map((a: any) => ({
+          pda:        a.publicKey.toBase58(),
+          researcher: a.account.researcher.toBase58(),
+          fileHash:   Buffer.from(a.account.fileHash).toString("hex"),
+          timestamp:  a.account.timestamp.toNumber(),
+          metadata:   a.account.metadata,
+        }))
+        .sort((a: FeedEntry, b: FeedEntry) => b.timestamp - a.timestamp)
+        .slice(0, 50);
+
+      setFeed(entries);
+    } catch (e: any) {
+      setFeedError(e?.message ?? "Failed to load discoveries.");
+    } finally {
+      setFeedLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "feed") loadFeed();
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div className="solsci-app">
       <header className="solsci-header">
@@ -253,12 +325,9 @@ export default function Dashboard() {
 
       <div className="topbar">
         <div className="tabs">
-          <button className={`tab${tab === "register" ? " active" : ""}`} onClick={() => setTab("register")}>
-            Register
-          </button>
-          <button className={`tab${tab === "verify" ? " active" : ""}`} onClick={() => setTab("verify")}>
-            Verify
-          </button>
+          <button className={`tab${tab === "register" ? " active" : ""}`} onClick={() => setTab("register")}>Register</button>
+          <button className={`tab${tab === "verify"   ? " active" : ""}`} onClick={() => setTab("verify")}>Verify</button>
+          <button className={`tab${tab === "feed"     ? " active" : ""}`} onClick={() => setTab("feed")}>Feed</button>
         </div>
         <WalletMultiButton />
       </div>
@@ -276,12 +345,8 @@ export default function Dashboard() {
               onDrop={onDrop}
             >
               <p>{file ? file.name : "Drop your FASTQ / analysis output here, or click to browse"}</p>
-              <input
-                ref={inputRef}
-                type="file"
-                style={{ display: "none" }}
-                onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
-              />
+              <input ref={inputRef} type="file" style={{ display: "none" }}
+                onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])} />
             </div>
             {fileHash && <div className="hash-display">SHA-256: {fileHash}</div>}
           </div>
@@ -291,11 +356,7 @@ export default function Dashboard() {
               <h2>2. Analysis Metadata</h2>
               <label className="field-label">
                 Analysis Type
-                <select
-                  className="select-input"
-                  value={analysisType}
-                  onChange={(e) => setAnalysisType(e.target.value)}
-                >
+                <select className="select-input" value={analysisType} onChange={(e) => setAnalysisType(e.target.value)}>
                   {ANALYSIS_TYPES.map((t) => (
                     <option key={t} value={t}>{t.replace(/_/g, " ")}</option>
                   ))}
@@ -311,17 +372,13 @@ export default function Dashboard() {
           {hashBytes && (
             <div className="card">
               <h2>3. Register Discovery</h2>
-              <button
-                className="btn"
-                disabled={!wallet.publicKey || registering}
-                onClick={registerDiscovery}
-              >
+              <button className="btn" disabled={!wallet.publicKey || registering} onClick={registerDiscovery}>
                 {registering
                   ? <><span className="spinner" />Registering…</>
                   : wallet.publicKey ? "Register on Solana" : "Connect Wallet First"}
               </button>
               {status && <p className="status">{status}</p>}
-              {error && <p className="error">{error}</p>}
+              {error  && <p className="error">{error}</p>}
             </div>
           )}
 
@@ -335,12 +392,9 @@ export default function Dashboard() {
                 </div>
                 <div className="cert-row">
                   <span className="cert-label">Transaction</span>
-                  <a
-                    className="cert-value mono cert-link"
+                  <a className="cert-value mono cert-link"
                     href={`https://explorer.solana.com/tx/${certificate.txSig}?cluster=devnet`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                    target="_blank" rel="noreferrer">
                     {certificate.txSig.slice(0, 24)}…
                   </a>
                 </div>
@@ -369,48 +423,26 @@ export default function Dashboard() {
 
           <label className="field-label">
             Researcher Wallet Address
-            <input
-              type="text"
-              className="text-input"
-              placeholder="Solana wallet pubkey"
-              value={verifyWalletInput}
-              onChange={(e) => setVerifyWalletInput(e.target.value)}
-            />
+            <input type="text" className="text-input" placeholder="Solana wallet pubkey"
+              value={verifyWalletInput} onChange={(e) => setVerifyWalletInput(e.target.value)} />
           </label>
 
           <label className="field-label" style={{ marginTop: "1rem" }}>
             File Hash (SHA-256 hex)
-            <input
-              type="text"
-              className="text-input mono"
-              placeholder="64-character hex string"
-              value={verifyHashInput}
-              onChange={(e) => setVerifyHashInput(e.target.value)}
-            />
+            <input type="text" className="text-input mono" placeholder="64-character hex string"
+              value={verifyHashInput} onChange={(e) => setVerifyHashInput(e.target.value)} />
           </label>
 
           <div className="or-divider">— or upload the file to auto-fill hash —</div>
 
-          <div
-            className="drop-zone"
-            style={{ padding: "1.25rem" }}
-            onClick={() => verifyFileRef.current?.click()}
-          >
+          <div className="drop-zone" style={{ padding: "1.25rem" }} onClick={() => verifyFileRef.current?.click()}>
             <p>Drop file here to compute hash</p>
-            <input
-              ref={verifyFileRef}
-              type="file"
-              style={{ display: "none" }}
-              onChange={(e) => e.target.files?.[0] && handleVerifyFileSelect(e.target.files[0])}
-            />
+            <input ref={verifyFileRef} type="file" style={{ display: "none" }}
+              onChange={(e) => e.target.files?.[0] && handleVerifyFileSelect(e.target.files[0])} />
           </div>
 
-          <button
-            className="btn"
-            style={{ marginTop: "1.25rem" }}
-            disabled={verifying || !verifyHashInput || !verifyWalletInput}
-            onClick={verifyDiscovery}
-          >
+          <button className="btn" style={{ marginTop: "1.25rem" }}
+            disabled={verifying || !verifyHashInput || !verifyWalletInput} onClick={verifyDiscovery}>
             {verifying ? <><span className="spinner" />Verifying…</> : "Verify on Solana"}
           </button>
 
@@ -438,11 +470,64 @@ export default function Dashboard() {
                 </div>
               </div>
             ) : (
-              <div className="verify-badge invalid" style={{ marginTop: "1rem" }}>
-                Not found on-chain
-              </div>
+              <div className="verify-badge invalid" style={{ marginTop: "1rem" }}>Not found on-chain</div>
             )
           )}
+        </div>
+      )}
+
+      {/* ── FEED TAB ── */}
+      {tab === "feed" && (
+        <div>
+          <div className="feed-header">
+            <span className="feed-title">Recent Discoveries</span>
+            <button className="btn-ghost" onClick={loadFeed} disabled={feedLoading}>
+              {feedLoading ? <><span className="spinner spinner-sm" />Loading…</> : "Refresh"}
+            </button>
+          </div>
+
+          {feedError && <p className="error" style={{ marginBottom: "1rem" }}>{feedError}</p>}
+
+          {feedLoading && feed.length === 0 && (
+            <div className="feed-empty">
+              <span className="spinner spinner-lg" />
+            </div>
+          )}
+
+          {!feedLoading && feed.length === 0 && !feedError && (
+            <div className="feed-empty">No discoveries registered yet.</div>
+          )}
+
+          {feed.map((entry) => (
+            <div key={entry.pda} className="feed-card">
+              <div className="feed-card-top">
+                <span className="feed-badge">{metaField(entry.metadata, "analysis_type").replace(/_/g, " ")}</span>
+                <span className="feed-date">{new Date(entry.timestamp * 1000).toLocaleDateString()}</span>
+              </div>
+
+              <div className="feed-row">
+                <span className="feed-label">Researcher</span>
+                <span className="feed-value mono">{truncate(entry.researcher)}</span>
+              </div>
+              <div className="feed-row">
+                <span className="feed-label">Hash</span>
+                <span className="feed-value mono">{truncate(entry.fileHash, 10)}</span>
+              </div>
+              <div className="feed-row">
+                <span className="feed-label">Tool</span>
+                <span className="feed-value">{metaField(entry.metadata, "tool")} {metaField(entry.metadata, "version")}</span>
+              </div>
+
+              <a
+                className="feed-explorer-link"
+                href={`https://explorer.solana.com/address/${entry.pda}?cluster=devnet`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View certificate →
+              </a>
+            </div>
+          ))}
         </div>
       )}
     </div>
