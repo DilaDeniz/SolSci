@@ -13,7 +13,7 @@ solsci = "8cmvWB8SrFvS5fKjsCw4bme9iFVeFCFsbTPKdq9NykbH"
 solsci = "8cmvWB8SrFvS5fKjsCw4bme9iFVeFCFsbTPKdq9NykbH"
 
 [provider]
-cluster = "Localnet"
+cluster = "Devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
