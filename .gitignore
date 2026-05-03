@@ -19,6 +19,7 @@ app/.env.local
 !app/src/idl/solsci.json
 !tsconfig.json
 !qvac/package.json
+!vercel.json
 
 # Test ledger (local validator state)
 test-ledger/
