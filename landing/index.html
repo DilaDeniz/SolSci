@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SolSci — Tamper-proof scientific discovery on Solana</title>
+  <meta name="description" content="Register your research outputs on-chain with a permanent, timestamped certificate. No intermediary. No way to rewrite the past." />
+  <meta property="og:title" content="SolSci" />
+  <meta property="og:description" content="Tamper-proof scientific discovery verification on Solana." />
+  <meta property="og:image" content="https://solsci-app.vercel.app/og.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --purple: #9945ff;
+      --green:  #14f195;
+      --bg:     #080810;
+      --bg2:    #0d0d18;
+      --border: #1c1c2e;
+      --text:   #e2e8f0;
+      --muted:  #64748b;
+      --dim:    #94a3b8;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 60px;
+      background: rgba(8,8,16,0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      text-decoration: none;
+    }
+
+    .nav-mark {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--purple), var(--green));
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 800;
+      color: #000;
+    }
+
+    .nav-name {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .nav-link {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.88rem;
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      transition: color 0.15s;
+    }
+
+    .nav-link:hover { color: var(--text); }
+
+    .btn-nav {
+      background: var(--purple);
+      color: #fff;
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 0.45rem 1rem;
+      border-radius: 7px;
+      transition: opacity 0.15s;
+    }
+
+    .btn-nav:hover { opacity: 0.85; }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 6rem 1.5rem 4rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -60%);
+      width: 700px;
+      height: 700px;
+      background: radial-gradient(ellipse, rgba(153,69,255,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-glow-2 {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 500px;
+      height: 300px;
+      background: radial-gradient(ellipse, rgba(20,241,149,0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-inner { position: relative; max-width: 720px; }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(153,69,255,0.1);
+      border: 1px solid rgba(153,69,255,0.25);
+      border-radius: 20px;
+      padding: 0.3rem 0.9rem;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--purple);
+      letter-spacing: 0.04em;
+      margin-bottom: 1.75rem;
+      text-transform: uppercase;
+    }
+
+    .hero-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.3; }
+    }
+
+    h1 {
+      font-size: clamp(2.4rem, 6vw, 4rem);
+      font-weight: 800;
+      letter-spacing: -0.04em;
+      line-height: 1.1;
+      color: #fff;
+      margin-bottom: 1.25rem;
+    }
+
+    h1 .grad {
+      background: linear-gradient(135deg, var(--purple), var(--green));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .hero-sub {
+      font-size: 1.15rem;
+      color: var(--dim);
+      max-width: 540px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.7;
+    }
+
+    .hero-cta {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: linear-gradient(135deg, var(--purple), var(--green));
+      color: #000;
+      text-decoration: none;
+      font-size: 0.95rem;
+      font-weight: 700;
+      padding: 0.8rem 1.75rem;
+      border-radius: 9px;
+      transition: opacity 0.15s, transform 0.15s;
+    }
+
+    .btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--dim);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      padding: 0.8rem 1.5rem;
+      border-radius: 9px;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .btn-secondary:hover { border-color: #3a3a5e; color: var(--text); }
+
+    /* ── STATS ── */
+    .stats {
+      display: flex;
+      justify-content: center;
+      gap: 3rem;
+      margin-top: 3.5rem;
+      padding-top: 2.5rem;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .stat { text-align: center; }
+
+    .stat-num {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -0.03em;
+    }
+
+    .stat-num span { color: var(--green); }
+
+    .stat-label {
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-top: 0.2rem;
+    }
+
+    /* ── SECTION ── */
+    section { padding: 6rem 1.5rem; }
+
+    .section-inner {
+      max-width: 960px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: var(--purple);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 0.75rem;
+    }
+
+    h2 {
+      font-size: clamp(1.6rem, 4vw, 2.4rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      color: #fff;
+      margin-bottom: 1rem;
+    }
+
+    .section-sub {
+      font-size: 1rem;
+      color: var(--dim);
+      max-width: 560px;
+      margin-bottom: 3.5rem;
+      line-height: 1.7;
+    }
+
+    /* ── HOW IT WORKS ── */
+    #how { background: var(--bg2); }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .step-card {
+      background: var(--bg2);
+      padding: 2rem 1.75rem;
+    }
+
+    .step-num {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: rgba(153,69,255,0.12);
+      border: 1px solid rgba(153,69,255,0.25);
+      color: var(--purple);
+      font-size: 0.78rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.1rem;
+    }
+
+    .step-card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.5rem;
+    }
+
+    .step-card p {
+      font-size: 0.87rem;
+      color: var(--dim);
+      line-height: 1.65;
+    }
+
+    /* ── FEATURES ── */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1.25rem;
+    }
+
+    .feature {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.75rem;
+      transition: border-color 0.2s;
+    }
+
+    .feature:hover { border-color: #2a2a4a; }
+
+    .feature-icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .feature h3 {
+      font-size: 0.97rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.4rem;
+    }
+
+    .feature p {
+      font-size: 0.85rem;
+      color: var(--dim);
+      line-height: 1.65;
+    }
+
+    /* ── CODE ── */
+    #cli { background: var(--bg2); }
+
+    .code-block {
+      background: #05050c;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .code-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.1rem;
+      border-bottom: 1px solid var(--border);
+      background: #080810;
+    }
+
+    .code-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .code-title {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-left: auto;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      line-height: 1.8;
+      padding: 1.5rem 1.75rem;
+      overflow-x: auto;
+      color: #abb2bf;
+    }
+
+    .c-comment { color: #5c6370; }
+    .c-cmd     { color: var(--green); }
+    .c-flag    { color: var(--purple); }
+    .c-val     { color: #e5c07b; }
+    .c-out     { color: var(--dim); }
+    .c-hash    { color: #14f195; }
+
+    /* ── USE CASES ── */
+    .usecases {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+
+    .usecase {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.4rem;
+    }
+
+    .usecase-icon { font-size: 1.4rem; margin-bottom: 0.65rem; }
+
+    .usecase h4 {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 0.35rem;
+    }
+
+    .usecase p {
+      font-size: 0.8rem;
+      color: var(--dim);
+      line-height: 1.6;
+    }
+
+    /* ── CTA SECTION ── */
+    .cta-section {
+      text-align: center;
+      padding: 6rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cta-glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 500px;
+      height: 300px;
+      background: radial-gradient(ellipse, rgba(153,69,255,0.1) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .cta-inner { position: relative; max-width: 560px; margin: 0 auto; }
+
+    .cta-section h2 { margin-bottom: 1rem; }
+
+    .cta-section p {
+      color: var(--dim);
+      font-size: 1rem;
+      margin-bottom: 2.5rem;
+      line-height: 1.7;
+    }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 1.5rem;
+    }
+
+    .footer-inner {
+      max-width: 960px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      text-decoration: none;
+    }
+
+    .footer-copy {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 1.25rem;
+    }
+
+    .footer-links a {
+      font-size: 0.82rem;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+
+    .footer-links a:hover { color: var(--text); }
+
+    /* ── MOBILE ── */
+    @media (max-width: 700px) {
+      nav { padding: 0 1rem; }
+      .nav-links { gap: 0; }
+      .nav-link { display: none; }
+      .steps { grid-template-columns: 1fr; }
+      .features { grid-template-columns: 1fr; }
+      .usecases { grid-template-columns: 1fr; }
+      .stats { gap: 1.5rem; }
+      .footer-inner { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── NAV ── -->
+<nav>
+  <a href="#" class="nav-logo">
+    <div class="nav-mark">S</div>
+    <span class="nav-name">SolSci</span>
+  </a>
+  <div class="nav-links">
+    <a href="#how" class="nav-link">How it works</a>
+    <a href="#features" class="nav-link">Features</a>
+    <a href="#cli" class="nav-link">CLI</a>
+    <a href="https://solsci-app.vercel.app" class="btn-nav" target="_blank">Launch App →</a>
+  </div>
+</nav>
+
+<!-- ── HERO ── -->
+<section class="hero">
+  <div class="hero-glow"></div>
+  <div class="hero-glow-2"></div>
+  <div class="hero-inner">
+    <div class="hero-badge">
+      <div class="hero-badge-dot"></div>
+      Live on Solana Devnet
+    </div>
+
+    <h1>Science deserves<br />an <span class="grad">immutable record</span></h1>
+
+    <p class="hero-sub">
+      Register any research output on-chain with a permanent, timestamped certificate.
+      The file never leaves your machine — only its SHA-256 hash gets stored.
+      No intermediary. No trusted third party. No way to rewrite the past.
+    </p>
+
+    <div class="hero-cta">
+      <a href="https://solsci-app.vercel.app" class="btn-primary" target="_blank">
+        Launch App →
+      </a>
+      <a href="https://github.com/diladeniz/solsci" class="btn-secondary" target="_blank">
+        View on GitHub
+      </a>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-num"><span>SHA-256</span></div>
+        <div class="stat-label">File hash, computed locally</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num"><span>∞</span></div>
+        <div class="stat-label">Immutable on Solana</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num"><span>0</span></div>
+        <div class="stat-label">Files uploaded to any server</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── HOW IT WORKS ── -->
+<section id="how">
+  <div class="section-inner">
+    <div class="section-label">How it works</div>
+    <h2>Three steps. One permanent proof.</h2>
+    <p class="section-sub">
+      From any research output to an on-chain certificate in seconds. Works with any file format — data, code, documents, images.
+    </p>
+
+    <div class="steps">
+      <div class="step-card">
+        <div class="step-num">01</div>
+        <h3>Hash locally</h3>
+        <p>SHA-256 of your file is computed in the browser or CLI — entirely on your device. The file is never transmitted anywhere.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">02</div>
+        <h3>Register on-chain</h3>
+        <p>A Program Derived Address (PDA) keyed by <code style="color:var(--green);font-size:0.82em">(wallet, hash)</code> is created on Solana. It stores the hash, timestamp, and your metadata.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">03</div>
+        <h3>Verify anytime</h3>
+        <p>Anyone with the original file can verify: hash it themselves, look up the PDA, compare. No account needed. No permissions required.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── FEATURES ── -->
+<section id="features">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2>Built for researchers,<br />not institutions</h2>
+    <p class="section-sub">
+      Every feature is designed to protect scientific integrity without adding friction to your workflow.
+    </p>
+
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">🔒</div>
+        <h3>Privacy-first</h3>
+        <p>Your raw data never leaves your machine. Only the 32-byte hash is stored on-chain. No server, no cloud upload, no data exposure.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⏱️</div>
+        <h3>Tamper-proof timestamp</h3>
+        <p>Solana's block time gives you a verifiable proof of existence. Once registered, the timestamp cannot be altered by anyone — not even us.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🤖</div>
+        <h3>Local AI metadata (QVAC)</h3>
+        <p>Powered by Tether's QVAC SDK, the AI assistant reads your file locally and suggests analysis type, tool, and description — completely offline.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <h3>CLI for CI/CD</h3>
+        <p>The Rust engine integrates into any pipeline. Auto-stamp analysis outputs on every push. Works with GitHub Actions out of the box.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🌍</div>
+        <h3>Any science, any file</h3>
+        <p>Genomics, climate data, particle physics, economics — 28 research categories. PDF, CSV, FASTQ, code, images — any file format.</p>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔑</div>
+        <h3>Self-sovereign</h3>
+        <p>You own the record. Only you can close it and reclaim the rent. The PDA is keyed to your wallet — no one can register the same hash under your identity.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── USE CASES ── -->
+<section style="background: var(--bg2);">
+  <div class="section-inner">
+    <div class="section-label">Use cases</div>
+    <h2>For every field of science</h2>
+    <p class="section-sub">One protocol, every discipline.</p>
+
+    <div class="usecases">
+      <div class="usecase">
+        <div class="usecase-icon">🧬</div>
+        <h4>Life Sciences</h4>
+        <p>Timestamp genomic sequences, proteomics results, clinical trial data before publication or peer review.</p>
+      </div>
+      <div class="usecase">
+        <div class="usecase-icon">🔭</div>
+        <h4>Physical Sciences</h4>
+        <p>Register spectroscopy outputs, telescope observations, particle physics datasets with an immutable proof of when you had the data.</p>
+      </div>
+      <div class="usecase">
+        <div class="usecase-icon">🌡️</div>
+        <h4>Climate & Environment</h4>
+        <p>Preserve atmospheric measurements, ocean temperature records, and environmental models against future disputes.</p>
+      </div>
+      <div class="usecase">
+        <div class="usecase-icon">💻</div>
+        <h4>Computational Research</h4>
+        <p>Stamp ML model checkpoints, benchmark results, and simulation outputs. Prove your result existed before a competitor's paper.</p>
+      </div>
+      <div class="usecase">
+        <div class="usecase-icon">📊</div>
+        <h4>Social & Economic</h4>
+        <p>Register surveys, economic datasets, and social science research before analysis — protecting against data dredging accusations.</p>
+      </div>
+      <div class="usecase">
+        <div class="usecase-icon">🏥</div>
+        <h4>Medicine</h4>
+        <p>Timestamp imaging data, trial results, and diagnostic outputs. Create an independent audit trail that no institution can alter.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CLI ── -->
+<section id="cli">
+  <div class="section-inner">
+    <div class="section-label">CLI Engine</div>
+    <h2>Works in your terminal,<br />your CI, your pipeline</h2>
+    <p class="section-sub">
+      The Rust-based engine streams files in 64 KB chunks — no memory issues with multi-GB genomics files. Dry-run mode for testing without a transaction.
+    </p>
+
+    <div class="code-block">
+      <div class="code-header">
+        <div class="code-dot" style="background:#ff5f57"></div>
+        <div class="code-dot" style="background:#febc2e"></div>
+        <div class="code-dot" style="background:#28c840"></div>
+        <span class="code-title">bash</span>
+      </div>
+      <pre><span class="c-comment"># Register a discovery</span>
+<span class="c-cmd">solsci-engine</span> register \
+  <span class="c-flag">--file</span> <span class="c-val">output.csv</span> \
+  <span class="c-flag">--analysis-type</span> <span class="c-val">climate_data</span> \
+  <span class="c-flag">--tool-version</span> <span class="c-val">"numpy/1.26.0"</span> \
+  <span class="c-flag">--program-id</span> <span class="c-val">8cmvWB8S...</span> \
+  <span class="c-flag">--keypair</span> ~/.config/solana/id.json
+
+<span class="c-out">→ Hashing output.csv (2.3 GB)…</span>
+<span class="c-out">→ SHA-256: <span class="c-hash">a4f3c9e2d1b0...</span></span>
+<span class="c-out">→ PDA: FgZFsSyr...</span>
+<span class="c-out">→ Transaction confirmed: 3eTgTSHR...</span>
+<span class="c-out">✓ Discovery registered on Solana devnet</span>
+
+<span class="c-comment"># Verify a record</span>
+<span class="c-cmd">solsci-engine</span> verify \
+  <span class="c-flag">--hash</span> <span class="c-val">a4f3c9e2d1b0...</span> \
+  <span class="c-flag">--researcher</span> <span class="c-val">2rToMxB6...</span> \
+  <span class="c-flag">--program-id</span> <span class="c-val">8cmvWB8S...</span>
+
+<span class="c-out">✓ Verified · registered 2026-05-03T20:04:42Z</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ── CTA ── -->
+<section class="cta-section">
+  <div class="cta-glow"></div>
+  <div class="cta-inner">
+    <h2>Start registering<br />your discoveries</h2>
+    <p>
+      Connect your Solana wallet, upload any research file, and get a permanent on-chain certificate in under 10 seconds.
+    </p>
+    <div style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;">
+      <a href="https://solsci-app.vercel.app" class="btn-primary" target="_blank">
+        Launch App →
+      </a>
+      <a href="https://github.com/diladeniz/solsci" class="btn-secondary" target="_blank">
+        GitHub
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ── FOOTER ── -->
+<footer>
+  <div class="footer-inner">
+    <a href="#" class="footer-logo">
+      <div class="nav-mark" style="width:22px;height:22px;font-size:0.7rem;">S</div>
+      <span style="font-size:0.9rem;font-weight:600;color:#fff;">SolSci</span>
+    </a>
+    <span class="footer-copy">Apache 2.0 · Built on Solana</span>
+    <div class="footer-links">
+      <a href="https://github.com/diladeniz/solsci" target="_blank">GitHub</a>
+      <a href="https://solsci-app.vercel.app" target="_blank">App</a>
+      <a href="https://explorer.solana.com/address/8cmvWB8SrFvS5fKjsCw4bme9iFVeFCFsbTPKdq9NykbH?cluster=devnet" target="_blank">Explorer</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
