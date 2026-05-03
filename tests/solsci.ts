@@ -4,168 +4,154 @@ import { Solsci } from "../target/types/solsci";
 import { assert } from "chai";
 import * as crypto from "crypto";
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function sha256(input: string): number[] {
+  return Array.from(crypto.createHash("sha256").update(input).digest());
+}
+
+function toFixedArray(bytes: number[]): number[] & { length: 32 } {
+  return [...Buffer.from(bytes)] as unknown as number[] & { length: 32 };
+}
+
+// ── Suite ─────────────────────────────────────────────────────────────────────
+
 describe("solsci", () => {
-  const provider = anchor.AnchorProvider.env();
+  const provider   = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.Solsci as Program<Solsci>;
+  const program    = anchor.workspace.Solsci as Program<Solsci>;
   const researcher = provider.wallet;
 
-  // Generate a deterministic test hash from a known FASTQ output string
-  const testFileHash = Array.from(
-    crypto.createHash("sha256").update("test-fastq-output-v1").digest()
-  ) as number[];
-
+  const testFileHash = sha256("test-fastq-output-v1");
   const testMetadata = JSON.stringify({
-    tool: "BioFastq-A",
-    version: "1.0.0",
-    analysis_type: "whole_genome_sequencing",
-    file_size_bytes: 1048576,
+    tool:             "BioFastq-A",
+    version:          "1.0.0",
+    analysis_type:    "whole_genome_sequencing",
+    file_size_bytes:  1048576,
     reference_genome: "GRCh38",
   });
 
-  function deriveDiscoveryPDA(
-    researcherPubkey: anchor.web3.PublicKey,
-    fileHash: number[]
-  ): [anchor.web3.PublicKey, number] {
+  function derivePDA(pubkey: anchor.web3.PublicKey, fileHash: number[]) {
     return anchor.web3.PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("discovery"),
-        researcherPubkey.toBuffer(),
-        Buffer.from(fileHash),
-      ],
-      program.programId
+      [Buffer.from("discovery"), pubkey.toBuffer(), Buffer.from(fileHash)],
+      program.programId,
     );
   }
 
-  it("registers a discovery and emits DiscoveryRegistered event", async () => {
-    const fileHashBytes = Buffer.from(testFileHash);
-    const [discoveryPDA] = deriveDiscoveryPDA(
-      researcher.publicKey,
-      testFileHash
-    );
+  // ── Register ────────────────────────────────────────────────────────────────
+
+  it("registers a discovery and stores correct on-chain state", async () => {
+    const [pda] = derivePDA(researcher.publicKey, testFileHash);
 
     const txSig = await program.methods
-      .registerDiscovery([...fileHashBytes] as unknown as number[] & { length: 32 }, testMetadata)
-      .accounts({
-        researcher: researcher.publicKey,
-        discoveryRecord: discoveryPDA,
-      })
+      .registerDiscovery(toFixedArray(testFileHash), testMetadata)
+      .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
       .rpc();
 
-    console.log("  register_discovery tx:", txSig);
+    console.log("  register_discovery:", txSig);
 
-    // Fetch and assert on-chain state
-    const record = await program.account.discoveryRecord.fetch(discoveryPDA);
+    const record = await program.account.discoveryRecord.fetch(pda);
 
-    assert.ok(
-      record.researcher.equals(researcher.publicKey),
-      "researcher pubkey mismatch"
-    );
-    assert.deepEqual(
-      Array.from(record.fileHash),
-      testFileHash,
-      "file hash mismatch"
-    );
+    assert.ok(record.researcher.equals(researcher.publicKey), "researcher mismatch");
+    assert.deepEqual(Array.from(record.fileHash), testFileHash, "file hash mismatch");
     assert.equal(record.metadata, testMetadata, "metadata mismatch");
-    assert.isAbove(record.timestamp.toNumber(), 0, "timestamp should be set");
+    assert.isAbove(record.timestamp.toNumber(), 0, "timestamp must be set");
+    assert.isAbove(record.bump, -1, "bump must be stored");
   });
+
+  // ── Verify ──────────────────────────────────────────────────────────────────
 
   it("verifies an existing discovery record", async () => {
-    const [discoveryPDA] = deriveDiscoveryPDA(
-      researcher.publicKey,
-      testFileHash
-    );
+    const [pda] = derivePDA(researcher.publicKey, testFileHash);
 
     const txSig = await program.methods
-      .verifyDiscovery([...Buffer.from(testFileHash)] as unknown as number[] & { length: 32 })
-      .accounts({
-        researcher: researcher.publicKey,
-        discoveryRecord: discoveryPDA,
-      })
+      .verifyDiscovery(toFixedArray(testFileHash))
+      .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
       .rpc();
 
-    console.log("  verify_discovery tx:", txSig);
-    assert.ok(txSig, "verify_discovery should return a transaction signature");
+    console.log("  verify_discovery:", txSig);
+    assert.ok(txSig, "expected a transaction signature");
   });
 
+  // ── Validation ──────────────────────────────────────────────────────────────
+
   it("rejects metadata exceeding 512 bytes", async () => {
-    const longMetadata = "x".repeat(513);
-    const otherHash = Array.from(
-      crypto.createHash("sha256").update("other-output").digest()
-    );
-    const [otherPDA] = deriveDiscoveryPDA(researcher.publicKey, otherHash);
+    const badHash = sha256("bad-metadata-test");
+    const [pda]   = derivePDA(researcher.publicKey, badHash);
 
     try {
       await program.methods
-        .registerDiscovery(
-          [...Buffer.from(otherHash)] as unknown as number[] & { length: 32 },
-          longMetadata
-        )
-        .accounts({
-          researcher: researcher.publicKey,
-          discoveryRecord: otherPDA,
-        })
+        .registerDiscovery(toFixedArray(badHash), "x".repeat(513))
+        .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
         .rpc();
       assert.fail("Expected MetadataTooLong error");
     } catch (err: any) {
-      assert.include(
-        err.toString(),
-        "MetadataTooLong",
-        "should throw MetadataTooLong"
-      );
+      assert.include(err.toString(), "MetadataTooLong");
     }
   });
 
   it("rejects empty metadata", async () => {
-    const emptyHash = Array.from(
-      crypto.createHash("sha256").update("empty-meta-test").digest()
-    );
-    const [emptyPDA] = deriveDiscoveryPDA(researcher.publicKey, emptyHash);
+    const badHash = sha256("empty-metadata-test");
+    const [pda]   = derivePDA(researcher.publicKey, badHash);
 
     try {
       await program.methods
-        .registerDiscovery(
-          [...Buffer.from(emptyHash)] as unknown as number[] & { length: 32 },
-          ""
-        )
-        .accounts({
-          researcher: researcher.publicKey,
-          discoveryRecord: emptyPDA,
-        })
+        .registerDiscovery(toFixedArray(badHash), "")
+        .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
         .rpc();
       assert.fail("Expected MetadataEmpty error");
     } catch (err: any) {
-      assert.include(
-        err.toString(),
-        "MetadataEmpty",
-        "should throw MetadataEmpty"
-      );
+      assert.include(err.toString(), "MetadataEmpty");
     }
   });
 
-  it("prevents duplicate registration for same researcher + hash", async () => {
-    const [discoveryPDA] = deriveDiscoveryPDA(
-      researcher.publicKey,
-      testFileHash
-    );
+  it("rejects duplicate registration for the same researcher + hash", async () => {
+    const [pda] = derivePDA(researcher.publicKey, testFileHash);
 
     try {
       await program.methods
-        .registerDiscovery(
-          [...Buffer.from(testFileHash)] as unknown as number[] & { length: 32 },
-          testMetadata
-        )
-        .accounts({
-          researcher: researcher.publicKey,
-          discoveryRecord: discoveryPDA,
-        })
+        .registerDiscovery(toFixedArray(testFileHash), testMetadata)
+        .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
         .rpc();
       assert.fail("Expected duplicate registration to fail");
     } catch (err: any) {
-      // Anchor will reject with "already in use" because the PDA account
-      // was already initialised in the first test
-      assert.ok(err, "duplicate registration should throw");
+      // Anchor rejects with "already in use" because the PDA account was
+      // initialised in the first test.
+      assert.ok(err, "duplicate registration must throw");
+    }
+  });
+
+  // ── Close ───────────────────────────────────────────────────────────────────
+
+  it("closes a discovery record and returns rent to the researcher", async () => {
+    const closeHash = sha256("discovery-to-close");
+    const [pda]     = derivePDA(researcher.publicKey, closeHash);
+
+    // Register first so there is something to close.
+    await program.methods
+      .registerDiscovery(toFixedArray(closeHash), testMetadata)
+      .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
+      .rpc();
+
+    const balanceBefore = await provider.connection.getBalance(researcher.publicKey);
+
+    const txSig = await program.methods
+      .closeDiscovery(toFixedArray(closeHash))
+      .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
+      .rpc();
+
+    console.log("  close_discovery:", txSig);
+
+    const balanceAfter = await provider.connection.getBalance(researcher.publicKey);
+    assert.isAbove(balanceAfter, balanceBefore, "rent should be returned to researcher");
+
+    // Account must no longer exist.
+    try {
+      await program.account.discoveryRecord.fetch(pda);
+      assert.fail("Closed account should not be fetchable");
+    } catch (err: any) {
+      assert.ok(err, "fetching a closed account must throw");
     }
   });
 });
