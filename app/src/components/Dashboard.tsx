@@ -607,7 +607,7 @@ export default function Dashboard() {
               <input
                 type="text"
                 className="text-input search-input"
-                placeholder="AI semantic search — e.g. "RNA cancer genomics""
+                placeholder="AI semantic search — e.g. RNA cancer genomics"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && runSemanticSearch()}

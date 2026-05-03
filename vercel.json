@@ -1,6 +1,6 @@
 {
   "buildCommand": "cd app && npm install --legacy-peer-deps && npm run build",
-  "outputDirectory": "app/build",
+  "outputDirectory": "app/dist",
   "installCommand": "echo skip",
   "framework": null
 }
