@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
+declare_id!("8cmvWB8SrFvS5fKjsCw4bme9iFVeFCFsbTPKdq9NykbH");
 
 pub const MAX_METADATA_LEN: usize = 512;
 
@@ -136,7 +136,6 @@ pub struct DiscoveryRecord {
 
 #[event]
 pub struct DiscoveryRegistered {
-    #[index]
     pub researcher:     Pubkey,
     pub file_hash:      [u8; 32],
     pub timestamp:      i64,
@@ -146,7 +145,6 @@ pub struct DiscoveryRegistered {
 
 #[event]
 pub struct DiscoveryVerified {
-    #[index]
     pub researcher:     Pubkey,
     pub file_hash:      [u8; 32],
     pub timestamp:      i64,

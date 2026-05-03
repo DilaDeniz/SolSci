@@ -1,0 +1,376 @@
+{
+  "address": "8cmvWB8SrFvS5fKjsCw4bme9iFVeFCFsbTPKdq9NykbH",
+  "metadata": {
+    "name": "solsci",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SolSci — on-chain scientific discovery verification protocol"
+  },
+  "instructions": [
+    {
+      "name": "close_discovery",
+      "docs": [
+        "Close a discovery record and return the rent lamports to the researcher.",
+        "",
+        "Only the original researcher can close their own record. The `close`",
+        "constraint handles the lamport transfer automatically."
+      ],
+      "discriminator": [
+        68,
+        228,
+        43,
+        231,
+        210,
+        107,
+        157,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "researcher",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "discovery_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "researcher"
+              },
+              {
+                "kind": "arg",
+                "path": "file_hash"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "_file_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "register_discovery",
+      "docs": [
+        "Register a new scientific discovery on-chain.",
+        "",
+        "Creates a PDA keyed by `(researcher, file_hash)` so the same researcher",
+        "cannot overwrite an existing record for the same file hash."
+      ],
+      "discriminator": [
+        63,
+        188,
+        175,
+        73,
+        49,
+        157,
+        163,
+        63
+      ],
+      "accounts": [
+        {
+          "name": "researcher",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "discovery_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "researcher"
+              },
+              {
+                "kind": "arg",
+                "path": "file_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "file_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "metadata",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "verify_discovery",
+      "docs": [
+        "Verify an existing discovery record by emitting a `DiscoveryVerified` event.",
+        "",
+        "Read-only in effect — useful for CPI calls from other protocols that need",
+        "to assert a discovery exists without fetching the account themselves."
+      ],
+      "discriminator": [
+        165,
+        40,
+        125,
+        103,
+        133,
+        125,
+        85,
+        103
+      ],
+      "accounts": [
+        {
+          "name": "researcher"
+        },
+        {
+          "name": "discovery_record",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  105,
+                  115,
+                  99,
+                  111,
+                  118,
+                  101,
+                  114,
+                  121
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "researcher"
+              },
+              {
+                "kind": "arg",
+                "path": "file_hash"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "_file_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "DiscoveryRecord",
+      "discriminator": [
+        245,
+        152,
+        169,
+        214,
+        121,
+        7,
+        209,
+        179
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "DiscoveryRegistered",
+      "discriminator": [
+        248,
+        127,
+        46,
+        26,
+        185,
+        205,
+        47,
+        204
+      ]
+    },
+    {
+      "name": "DiscoveryVerified",
+      "discriminator": [
+        237,
+        74,
+        97,
+        219,
+        137,
+        190,
+        228,
+        185
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "MetadataTooLong",
+      "msg": "Metadata string exceeds the 512-byte limit"
+    },
+    {
+      "code": 6001,
+      "name": "MetadataEmpty",
+      "msg": "Metadata must not be empty"
+    }
+  ],
+  "types": [
+    {
+      "name": "DiscoveryRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "researcher",
+            "type": "pubkey"
+          },
+          {
+            "name": "file_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "metadata",
+            "type": "string"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Stored for cheap PDA re-derivation in CPI callers."
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DiscoveryRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "researcher",
+            "type": "pubkey"
+          },
+          {
+            "name": "file_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "metadata",
+            "type": "string"
+          },
+          {
+            "name": "certificate_id",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DiscoveryVerified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "researcher",
+            "type": "pubkey"
+          },
+          {
+            "name": "file_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          },
+          {
+            "name": "metadata",
+            "type": "string"
+          },
+          {
+            "name": "certificate_id",
+            "type": "pubkey"
+          }
+        ]
+      }
+    }
+  ]
+}

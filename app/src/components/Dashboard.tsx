@@ -5,7 +5,8 @@ import { PublicKey, SystemProgram } from "@solana/web3.js";
 import { AnchorProvider, Program, Idl } from "@coral-xyz/anchor";
 import idl from "../idl/solsci.json";
 
-const PROGRAM_ID = new PublicKey((idl as any).address);
+const PROGRAM_ID    = new PublicKey((idl as any).address);
+const QVAC_BASE_URL = "http://localhost:3001";
 
 const ANALYSIS_TYPES = [
   "whole_genome_sequencing",
@@ -43,6 +44,7 @@ interface FeedEntry {
   fileHash: string;
   timestamp: number;
   metadata: string;
+  _score?: number;
 }
 
 type Tab = "register" | "verify" | "feed";
@@ -53,39 +55,62 @@ function truncate(s: string, n = 8) {
   return s.length <= n * 2 + 3 ? s : `${s.slice(0, n)}…${s.slice(-n)}`;
 }
 
+async function readTextSample(file: File, bytes = 4096): Promise<string> {
+  const slice = file.slice(0, bytes);
+  const buf   = await slice.arrayBuffer();
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+  catch { return ""; }
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { connection } = useConnection();
-  const wallet = useWallet();
-  const [tab, setTab] = useState<Tab>("register");
+  const wallet         = useWallet();
+  const [tab, setTab]  = useState<Tab>("register");
+
+  // ── QVAC availability ──────────────────────────────────────────────────────
+  const [qvacOnline, setQvacOnline] = useState(false);
+
+  useEffect(() => {
+    fetch(`${QVAC_BASE_URL}/api/health`, { signal: AbortSignal.timeout(800) })
+      .then((r) => setQvacOnline(r.ok))
+      .catch(() => setQvacOnline(false));
+  }, []);
 
   // ── Register state ─────────────────────────────────────────────────────────
-  const [file, setFile] = useState<File | null>(null);
+  const [file, setFile]         = useState<File | null>(null);
   const [fileHash, setFileHash] = useState("");
   const [hashBytes, setHashBytes] = useState<Uint8Array | null>(null);
   const [analysisType, setAnalysisType] = useState("whole_genome_sequencing");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
+  const [toolName, setToolName] = useState("BioFastq-A");
+  const [toolVersion, setToolVersion] = useState("1.0.0");
+  const [description, setDescription] = useState("");
+  const [status, setStatus]     = useState("");
+  const [error, setError]       = useState("");
   const [certificate, setCertificate] = useState<Certificate | null>(null);
   const [registering, setRegistering] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // ── Verify state ───────────────────────────────────────────────────────────
-  const [verifyHashInput, setVerifyHashInput] = useState("");
+  const [verifyHashInput,   setVerifyHashInput]   = useState("");
   const [verifyWalletInput, setVerifyWalletInput] = useState("");
-  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
-  const [verifyError, setVerifyError] = useState("");
-  const [verifying, setVerifying] = useState(false);
+  const [verifyResult,      setVerifyResult]      = useState<VerifyResult | null>(null);
+  const [verifyError,       setVerifyError]       = useState("");
+  const [verifying,         setVerifying]         = useState(false);
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
   // ── Feed state ─────────────────────────────────────────────────────────────
-  const [feed, setFeed] = useState<FeedEntry[]>([]);
+  const [feed,        setFeed]        = useState<FeedEntry[]>([]);
+  const [feedRaw,     setFeedRaw]     = useState<FeedEntry[]>([]);
   const [feedLoading, setFeedLoading] = useState(false);
-  const [feedError, setFeedError] = useState("");
+  const [feedError,   setFeedError]   = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searching,   setSearching]   = useState(false);
 
-  // ── Shared helpers ─────────────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────────────────
 
   async function hashFile(f: File): Promise<Uint8Array> {
     const buf = await f.arrayBuffer();
@@ -126,6 +151,57 @@ export default function Dashboard() {
     catch { return "—"; }
   }
 
+  // ── QVAC: suggest metadata ─────────────────────────────────────────────────
+
+  async function suggestWithAI() {
+    if (!file || !qvacOnline) return;
+    setSuggesting(true);
+    try {
+      const fileSample = await readTextSample(file);
+      const res = await fetch(`${QVAC_BASE_URL}/api/suggest`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ fileName: file.name, fileSample }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const suggestion = await res.json();
+      if (suggestion.analysis_type) setAnalysisType(suggestion.analysis_type);
+      if (suggestion.tool)          setToolName(suggestion.tool);
+      if (suggestion.version)       setToolVersion(suggestion.version);
+      if (suggestion.description)   setDescription(suggestion.description);
+    } catch (e: any) {
+      setError(`AI suggest failed: ${e.message}`);
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  // ── QVAC: semantic search ──────────────────────────────────────────────────
+
+  async function runSemanticSearch() {
+    if (!searchQuery.trim() || !qvacOnline) return;
+    setSearching(true);
+    try {
+      const res = await fetch(`${QVAC_BASE_URL}/api/search`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ query: searchQuery, discoveries: feedRaw }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const ranked: FeedEntry[] = await res.json();
+      setFeed(ranked);
+    } catch (e: any) {
+      setFeedError(`AI search failed: ${e.message}`);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  function clearSearch() {
+    setSearchQuery("");
+    setFeed(feedRaw);
+  }
+
   // ── Register handlers ──────────────────────────────────────────────────────
 
   const handleFileSelect = useCallback(async (f: File) => {
@@ -144,7 +220,7 @@ export default function Dashboard() {
       setError("Failed to hash file.");
       setStatus("");
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -162,17 +238,18 @@ export default function Dashboard() {
     setStatus("Building transaction…");
 
     try {
-      const program = getProgram();
+      const program  = getProgram();
       const metadata = JSON.stringify({
-        tool: "BioFastq-A",
-        version: "1.0.0",
+        tool:          toolName,
+        version:       toolVersion,
         analysis_type: analysisType,
         file_size_bytes: file.size,
-        file_name: file.name,
+        file_name:     file.name,
+        ...(description ? { description } : {}),
       });
 
       if (new TextEncoder().encode(metadata).length > 512) {
-        setError("Metadata too long (> 512 bytes). Shorten the analysis type or file name.");
+        setError("Metadata too long (> 512 bytes). Shorten the description or file name.");
         return;
       }
 
@@ -186,9 +263,9 @@ export default function Dashboard() {
       const txSig = await (program.methods as any)
         .registerDiscovery(Array.from(hashBytes), metadata)
         .accounts({
-          researcher: wallet.publicKey,
+          researcher:      wallet.publicKey,
           discoveryRecord: discoveryPDA,
-          systemProgram: SystemProgram.programId,
+          systemProgram:   SystemProgram.programId,
         })
         .rpc({ commitment: "confirmed" });
 
@@ -196,7 +273,7 @@ export default function Dashboard() {
       const record = await (program.account as any).discoveryRecord.fetch(discoveryPDA);
 
       setCertificate({
-        pda: discoveryPDA.toBase58(),
+        pda:       discoveryPDA.toBase58(),
         txSig,
         fileHash,
         timestamp: record.timestamp.toNumber(),
@@ -222,7 +299,7 @@ export default function Dashboard() {
     setVerifyError("");
     setVerifyResult(null);
 
-    const hashHex = verifyHashInput.trim().toLowerCase();
+    const hashHex   = verifyHashInput.trim().toLowerCase();
     const walletAddr = verifyWalletInput.trim();
 
     if (hashHex.length !== 64 || !/^[0-9a-f]+$/.test(hashHex)) {
@@ -247,7 +324,7 @@ export default function Dashboard() {
           : { publicKey: researcherKey, signTransaction: async (t: any) => t, signAllTransactions: async (t: any) => t },
         { commitment: "confirmed" }
       );
-      const program = new Program(idl as Idl, provider);
+      const program      = new Program(idl as Idl, provider);
       const hashBytesArr = Buffer.from(hashHex, "hex");
 
       const [pda] = PublicKey.findProgramAddressSync(
@@ -257,11 +334,11 @@ export default function Dashboard() {
 
       const record = await (program.account as any).discoveryRecord.fetch(pda);
       setVerifyResult({
-        found: true,
-        pda: pda.toBase58(),
+        found:      true,
+        pda:        pda.toBase58(),
         researcher: record.researcher.toBase58(),
-        timestamp: record.timestamp.toNumber(),
-        metadata: record.metadata,
+        timestamp:  record.timestamp.toNumber(),
+        metadata:   record.metadata,
       });
     } catch (e: any) {
       if (e?.message?.includes("Account does not exist")) {
@@ -279,6 +356,7 @@ export default function Dashboard() {
   async function loadFeed() {
     setFeedLoading(true);
     setFeedError("");
+    setSearchQuery("");
     try {
       const provider = new AnchorProvider(
         connection,
@@ -302,6 +380,7 @@ export default function Dashboard() {
         .sort((a: FeedEntry, b: FeedEntry) => b.timestamp - a.timestamp)
         .slice(0, 50);
 
+      setFeedRaw(entries);
       setFeed(entries);
     } catch (e: any) {
       setFeedError(e?.message ?? "Failed to load discoveries.");
@@ -329,7 +408,10 @@ export default function Dashboard() {
           <button className={`tab${tab === "verify"   ? " active" : ""}`} onClick={() => setTab("verify")}>Verify</button>
           <button className={`tab${tab === "feed"     ? " active" : ""}`} onClick={() => setTab("feed")}>Feed</button>
         </div>
-        <WalletMultiButton />
+        <div className="topbar-right">
+          {qvacOnline && <span className="qvac-badge">AI local</span>}
+          <WalletMultiButton />
+        </div>
       </div>
 
       {/* ── REGISTER TAB ── */}
@@ -354,6 +436,20 @@ export default function Dashboard() {
           {file && (
             <div className="card">
               <h2>2. Analysis Metadata</h2>
+
+              {qvacOnline && (
+                <button
+                  className="btn-ai"
+                  disabled={suggesting}
+                  onClick={suggestWithAI}
+                  title="Uses local Llama 3.2 1B via QVAC — no data leaves your machine"
+                >
+                  {suggesting
+                    ? <><span className="spinner" />Thinking locally…</>
+                    : "Suggest with AI (local)"}
+                </button>
+              )}
+
               <label className="field-label">
                 Analysis Type
                 <select className="select-input" value={analysisType} onChange={(e) => setAnalysisType(e.target.value)}>
@@ -362,7 +458,27 @@ export default function Dashboard() {
                   ))}
                 </select>
               </label>
-              <div className="file-info">
+
+              <label className="field-label" style={{ marginTop: "0.75rem" }}>
+                Tool
+                <input type="text" className="text-input" value={toolName}
+                  onChange={(e) => setToolName(e.target.value)} />
+              </label>
+
+              <label className="field-label" style={{ marginTop: "0.75rem" }}>
+                Version
+                <input type="text" className="text-input" value={toolVersion}
+                  onChange={(e) => setToolVersion(e.target.value)} />
+              </label>
+
+              <label className="field-label" style={{ marginTop: "0.75rem" }}>
+                Description (optional)
+                <input type="text" className="text-input" value={description}
+                  placeholder="AI-generated or manual summary"
+                  onChange={(e) => setDescription(e.target.value)} />
+              </label>
+
+              <div className="file-info" style={{ marginTop: "0.75rem" }}>
                 <span>{file.name}</span>
                 <span>{(file.size / 1024).toFixed(1)} KB</span>
               </div>
@@ -486,12 +602,29 @@ export default function Dashboard() {
             </button>
           </div>
 
+          {qvacOnline && (
+            <div className="search-bar">
+              <input
+                type="text"
+                className="text-input search-input"
+                placeholder="AI semantic search — e.g. "RNA cancer genomics""
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && runSemanticSearch()}
+              />
+              <button className="btn-ai search-btn" disabled={searching || !searchQuery.trim()} onClick={runSemanticSearch}>
+                {searching ? <span className="spinner" /> : "Search"}
+              </button>
+              {searchQuery && (
+                <button className="btn-ghost" onClick={clearSearch}>Clear</button>
+              )}
+            </div>
+          )}
+
           {feedError && <p className="error" style={{ marginBottom: "1rem" }}>{feedError}</p>}
 
           {feedLoading && feed.length === 0 && (
-            <div className="feed-empty">
-              <span className="spinner spinner-lg" />
-            </div>
+            <div className="feed-empty"><span className="spinner spinner-lg" /></div>
           )}
 
           {!feedLoading && feed.length === 0 && !feedError && (
@@ -517,6 +650,18 @@ export default function Dashboard() {
                 <span className="feed-label">Tool</span>
                 <span className="feed-value">{metaField(entry.metadata, "tool")} {metaField(entry.metadata, "version")}</span>
               </div>
+              {metaField(entry.metadata, "description") !== "—" && (
+                <div className="feed-row">
+                  <span className="feed-label">Description</span>
+                  <span className="feed-value">{metaField(entry.metadata, "description")}</span>
+                </div>
+              )}
+              {entry._score !== undefined && (
+                <div className="feed-row">
+                  <span className="feed-label">AI relevance</span>
+                  <span className="feed-value feed-score">{(entry._score * 100).toFixed(0)}%</span>
+                </div>
+              )}
 
               <a
                 className="feed-explorer-link"

@@ -395,9 +395,87 @@ body {
 .spinner-sm { width: 12px; height: 12px; }
 .spinner-lg { width: 28px; height: 28px; border-width: 3px; border-top-color: #9945ff; }
 
+/* ── QVAC AI elements ── */
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.qvac-badge {
+  background: #14f19514;
+  border: 1px solid #14f19530;
+  border-radius: 20px;
+  color: #14f195;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 0.25rem 0.65rem;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.btn-ai {
+  background: #14f19514;
+  border: 1px solid #14f19530;
+  border-radius: 8px;
+  color: #14f195;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.55rem 1rem;
+  margin-bottom: 1rem;
+  transition: background 0.2s, border-color 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-ai:not(:disabled):hover {
+  background: #14f19520;
+  border-color: #14f19560;
+}
+
+.btn-ai:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-ai .spinner {
+  border-color: rgba(20, 241, 149, 0.3);
+  border-top-color: #14f195;
+}
+
+/* ── Search bar ── */
+.search-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  align-items: center;
+}
+
+.search-input { margin-top: 0; }
+
+.search-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding: 0.55rem 1rem;
+}
+
+/* ── AI score ── */
+.feed-score {
+  background: #14f19514;
+  border: 1px solid #14f19530;
+  border-radius: 4px;
+  color: #14f195;
+  font-size: 0.72rem;
+  font-family: monospace;
+  padding: 0.1rem 0.4rem;
+}
+
 /* ── Mobile ── */
 @media (max-width: 600px) {
   .topbar { flex-direction: column; align-items: stretch; }
+  .topbar-right { justify-content: space-between; }
   .tabs { justify-content: center; }
   .solsci-header h1 { font-size: 1.7rem; }
+  .search-bar { flex-wrap: wrap; }
 }

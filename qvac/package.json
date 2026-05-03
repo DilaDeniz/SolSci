@@ -1,0 +1,19 @@
+{
+  "name": "solsci-qvac",
+  "version": "1.0.0",
+  "description": "Local AI metadata assistant for SolSci — powered by QVAC (Tether)",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "assist": "node src/assist.js"
+  },
+  "engines": {
+    "node": ">=22.17"
+  },
+  "dependencies": {
+    "@qvac/sdk": "latest",
+    "cors": "^2.8.5",
+    "express": "^4.21.2"
+  }
+}
