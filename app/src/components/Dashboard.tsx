@@ -152,6 +152,7 @@ export default function Dashboard() {
   const [toolName, setToolName]       = useState("");
   const [toolVersion, setToolVersion] = useState("");
   const [description, setDescription] = useState("");
+  const [publicUrl, setPublicUrl]     = useState("");
   const [status, setStatus]           = useState("");
   const [error, setError]             = useState("");
   const [certificate, setCertificate] = useState<Certificate | null>(null);
@@ -171,11 +172,12 @@ export default function Dashboard() {
   const [ocrText, setOcrText]         = useState("");
 
   // ── Verify state ──────────────────────────────────────────────────────────
-  const [verifyHash,   setVerifyHash]   = useState("");
-  const [verifyWallet, setVerifyWallet] = useState("");
-  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
-  const [verifyError,  setVerifyError]  = useState("");
-  const [verifying,    setVerifying]    = useState(false);
+  const [verifyHash,    setVerifyHash]    = useState("");
+  const [verifyWallet,  setVerifyWallet]  = useState("");
+  const [verifyResult,  setVerifyResult]  = useState<VerifyResult | null>(null);
+  const [verifyError,   setVerifyError]   = useState("");
+  const [verifying,     setVerifying]     = useState(false);
+  const [fetchVerifying, setFetchVerifying] = useState(false);
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
   // ── Feed state ────────────────────────────────────────────────────────────
@@ -344,6 +346,7 @@ export default function Dashboard() {
     setCertificate(null);
     setError("");
     setOcrText("");
+    setPublicUrl("");
     setStatus("Hashing…");
     try {
       const bytes = await hashFile(f);
@@ -374,6 +377,7 @@ export default function Dashboard() {
         ...(toolName    ? { tool: toolName }       : {}),
         ...(toolVersion ? { version: toolVersion } : {}),
         ...(description ? { description }          : {}),
+        ...(publicUrl   ? { url: publicUrl }       : {}),
         file_name:       file.name,
         file_size_bytes: file.size,
       });
@@ -448,6 +452,29 @@ export default function Dashboard() {
       setVerifying(false);
     }
   }, [verifyHash, verifyWallet, connection, wallet]);
+
+  // Auto-fetch file from URL in record metadata, hash it, compare to stored hash
+  const fetchAndVerify = useCallback(async (recordUrl: string, storedHash: string, researcherAddr: string) => {
+    setFetchVerifying(true);
+    setVerifyError("");
+    try {
+      const res  = await fetch(recordUrl);
+      if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
+      const buf  = await res.arrayBuffer();
+      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
+      const hex  = Array.from(hash).map((x) => x.toString(16).padStart(2, "0")).join("");
+      if (hex !== storedHash) {
+        setVerifyError(`Hash mismatch — file at URL does not match on-chain record.\nExpected: ${storedHash}\nGot: ${hex}`);
+      } else {
+        setVerifyHash(hex);
+        setVerifyWallet(researcherAddr);
+      }
+    } catch (e: any) {
+      setVerifyError(`Could not fetch file: ${e.message}`);
+    } finally {
+      setFetchVerifying(false);
+    }
+  }, []);
 
   // ── Feed ──────────────────────────────────────────────────────────────────
 
@@ -686,6 +713,16 @@ export default function Dashboard() {
                     )}
                   </label>
 
+                  <label className="field">
+                    <span>Public file URL <span className="field-opt">(optional — lets others auto-verify)</span></span>
+                    <input
+                      type="url"
+                      value={publicUrl}
+                      placeholder="https://github.com/you/repo/blob/main/results.csv"
+                      onChange={(e) => setPublicUrl(e.target.value)}
+                    />
+                  </label>
+
                   {/* Live byte counter */}
                   <div className="meta-counter">
                     <div className="meta-bar">
@@ -796,6 +833,34 @@ export default function Dashboard() {
                     <CertRow label="Registered" value={new Date(verifyResult.timestamp! * 1000).toUTCString()} />
                     <CertRow label="Metadata" value={renderMeta(verifyResult.metadata!)} />
                   </div>
+                  {/* Auto-verify from URL if researcher included one */}
+                  {metaField(verifyResult.metadata!, "url") && (
+                    <div className="fetch-verify-row">
+                      <span className="fetch-verify-hint">
+                        File URL on record —
+                      </span>
+                      <a
+                        href={metaField(verifyResult.metadata!, "url")}
+                        target="_blank" rel="noreferrer"
+                        className="fetch-verify-link"
+                      >
+                        {metaField(verifyResult.metadata!, "url").slice(0, 50)}…
+                      </a>
+                      <button
+                        className="btn-ai"
+                        disabled={fetchVerifying}
+                        onClick={() => fetchAndVerify(
+                          metaField(verifyResult!.metadata!, "url"),
+                          verifyHash,
+                          verifyResult!.researcher!,
+                        )}
+                      >
+                        {fetchVerifying
+                          ? <><span className="spin" /> Fetching…</>
+                          : "↓ Fetch file & verify hash"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="not-found">No record found on-chain for this hash + wallet.</div>
@@ -857,9 +922,16 @@ export default function Dashboard() {
                       <FeedMeta label="Hash" value={truncate(entry.fileHash, 10)} mono />
                       {(tool || ver) && <FeedMeta label="Tool" value={[tool, ver].filter(Boolean).join(" ")} />}
                     </div>
-                    <a className="feed-link" href={`https://explorer.solana.com/address/${entry.pda}?cluster=devnet`} target="_blank" rel="noreferrer">
-                      View certificate ↗
-                    </a>
+                    <div className="feed-card-footer">
+                      <a className="feed-link" href={`https://explorer.solana.com/address/${entry.pda}?cluster=devnet`} target="_blank" rel="noreferrer">
+                        View certificate ↗
+                      </a>
+                      {metaField(entry.metadata, "url") && (
+                        <a className="feed-link" href={metaField(entry.metadata, "url")} target="_blank" rel="noreferrer">
+                          Source file ↗
+                        </a>
+                      )}
+                    </div>
                   </div>
                 );
               })}
