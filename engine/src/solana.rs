@@ -5,9 +5,9 @@ use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{read_keypair_file, Keypair, Signer},
-    system_program,
     transaction::Transaction,
 };
+use solana_system_interface::program as system_program;
 use std::path::Path;
 
 // ── Key loading ───────────────────────────────────────────────────────────────

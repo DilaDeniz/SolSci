@@ -8,30 +8,54 @@ import Qvac from "@qvac/sdk";
 import { readFileSync } from "fs";
 import { basename, extname } from "path";
 
+// Must stay in sync with ANALYSIS_TYPES in app/src/components/Dashboard.tsx
 const ANALYSIS_TYPES = [
+  // Life sciences
   "whole_genome_sequencing",
   "rna_sequencing",
+  "single_cell_sequencing",
   "proteomics",
   "metabolomics",
-  "chip_seq",
-  "single_cell_sequencing",
   "metagenomics",
   "epigenomics",
-  "genomic_analysis",
+  "chip_seq",
+  "neuroscience",
+  "ecology",
+  "clinical_trial",
+  // Physical sciences
+  "spectroscopy",
+  "crystallography",
+  "particle_physics",
+  "astrophysics",
+  "atmospheric_science",
+  "ocean_science",
+  "quantum_experiment",
+  // Computational
+  "machine_learning",
+  "benchmark",
+  "simulation",
+  "dataset",
+  // Other
+  "chemistry",
+  "materials_science",
+  "social_science",
+  "economics",
+  "experiment",
   "other",
 ];
 
-const SYSTEM_PROMPT = `You are a bioinformatics metadata assistant.
-Given a research file name, extension, and an optional content preview, output a JSON object with these fields:
-- analysis_type: one of [${ANALYSIS_TYPES.join(", ")}]
-- tool: the likely tool or pipeline name (e.g. "STAR", "BWA", "Salmon", "fastp")
-- version: a plausible tool version string (e.g. "2.7.10a") or "unknown"
-- description: one sentence describing what this output likely contains
+const SYSTEM_PROMPT = `You are a scientific metadata assistant that works across all research disciplines — biology, physics, chemistry, astronomy, climate science, computer science, social science, and more.
 
-Respond with ONLY valid JSON, no prose.`;
+Given a research file name, its extension, and an optional content preview, output a JSON object with these fields:
+- analysis_type: one of [${ANALYSIS_TYPES.join(", ")}] — pick the closest match
+- tool: the software or pipeline likely used to produce this file (e.g. "Python", "R", "STAR", "MATLAB", "Jupyter")
+- version: a plausible version string (e.g. "3.11.0") or "unknown"
+- description: one sentence describing what this file likely contains
+
+Respond with ONLY valid JSON, no prose, no markdown fences.`;
 
 function buildPrompt(fileName, fileSample) {
-  const ext = extname(fileName);
+  const ext   = extname(fileName);
   const lines = fileSample ? fileSample.slice(0, 1000) : "";
   return `File name: ${fileName}\nExtension: ${ext}\nContent preview:\n${lines}`;
 }
@@ -60,22 +84,22 @@ export async function suggestMetadata(filePath, fileSample) {
     await qvac.unloadModel("inference");
   }
 
-  // Extract JSON from the response (model may wrap it in markdown fences)
+  // Extract JSON — model may occasionally wrap it in markdown fences
   const jsonMatch = fullText.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`Model returned non-JSON: ${fullText}`);
 
   const parsed = JSON.parse(jsonMatch[0]);
 
-  // Validate and normalise analysis_type
+  // Normalise analysis_type against the allowed list
   if (!ANALYSIS_TYPES.includes(parsed.analysis_type)) {
-    parsed.analysis_type = "genomic_analysis";
+    parsed.analysis_type = "other";
   }
 
   return {
-    analysis_type: parsed.analysis_type ?? "genomic_analysis",
-    tool:          parsed.tool        ?? "unknown",
-    version:       parsed.version     ?? "unknown",
-    description:   parsed.description ?? "",
+    analysis_type: parsed.analysis_type ?? "other",
+    tool:          parsed.tool          ?? "",
+    version:       parsed.version       ?? "",
+    description:   parsed.description   ?? "",
   };
 }
 
@@ -87,7 +111,7 @@ if (process.argv[2]) {
     const buf = readFileSync(filePath);
     sample = buf.slice(0, 4096).toString("utf8", 0, 4096);
   } catch {
-    // binary file — just use the name
+    // binary file — use filename only
   }
 
   suggestMetadata(filePath, sample)

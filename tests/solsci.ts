@@ -14,6 +14,18 @@ function toFixedArray(bytes: number[]): number[] & { length: 32 } {
   return [...Buffer.from(bytes)] as unknown as number[] & { length: 32 };
 }
 
+function makeMetadata(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    analysis_type:   "machine_learning",
+    tool:            "Python",
+    version:         "3.11.0",
+    description:     "Benchmark results for a transformer model on CIFAR-10",
+    file_name:       "results.json",
+    file_size_bytes: 4096,
+    ...overrides,
+  });
+}
+
 // ── Suite ─────────────────────────────────────────────────────────────────────
 
 describe("solsci", () => {
@@ -23,14 +35,8 @@ describe("solsci", () => {
   const program    = anchor.workspace.Solsci as Program<Solsci>;
   const researcher = provider.wallet;
 
-  const testFileHash = sha256("test-fastq-output-v1");
-  const testMetadata = JSON.stringify({
-    tool:             "BioFastq-A",
-    version:          "1.0.0",
-    analysis_type:    "whole_genome_sequencing",
-    file_size_bytes:  1048576,
-    reference_genome: "GRCh38",
-  });
+  const testFileHash = sha256("test-output-v1");
+  const testMetadata = makeMetadata();
 
   function derivePDA(pubkey: anchor.web3.PublicKey, fileHash: number[]) {
     return anchor.web3.PublicKey.findProgramAddressSync(
@@ -58,6 +64,13 @@ describe("solsci", () => {
     assert.equal(record.metadata, testMetadata, "metadata mismatch");
     assert.isAbove(record.timestamp.toNumber(), 0, "timestamp must be set");
     assert.isAbove(record.bump, -1, "bump must be stored");
+
+    // Verify the stored metadata parses back to the expected shape
+    const parsed = JSON.parse(record.metadata);
+    assert.equal(parsed.analysis_type, "machine_learning");
+    assert.equal(parsed.tool, "Python");
+    assert.equal(parsed.version, "3.11.0");
+    assert.ok(parsed.description, "description must be present");
   });
 
   // ── Verify ──────────────────────────────────────────────────────────────────
@@ -116,10 +129,28 @@ describe("solsci", () => {
         .rpc();
       assert.fail("Expected duplicate registration to fail");
     } catch (err: any) {
-      // Anchor rejects with "already in use" because the PDA account was
-      // initialised in the first test.
       assert.ok(err, "duplicate registration must throw");
     }
+  });
+
+  it("accepts metadata at the 512-byte boundary", async () => {
+    const boundaryHash = sha256("boundary-metadata-test");
+    const [pda]        = derivePDA(researcher.publicKey, boundaryHash);
+
+    // Build metadata that is exactly ≤ 512 bytes
+    const base   = makeMetadata({ description: "" });
+    const budget = 512 - base.length;
+    const padding = budget > 2 ? "x".repeat(budget - 2) : "";
+    const meta   = makeMetadata({ description: padding });
+
+    assert.isAtMost(new TextEncoder().encode(meta).length, 512, "test metadata must fit");
+
+    const txSig = await program.methods
+      .registerDiscovery(toFixedArray(boundaryHash), meta)
+      .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
+      .rpc();
+
+    assert.ok(txSig, "boundary-length metadata should succeed");
   });
 
   // ── Close ───────────────────────────────────────────────────────────────────
@@ -128,7 +159,6 @@ describe("solsci", () => {
     const closeHash = sha256("discovery-to-close");
     const [pda]     = derivePDA(researcher.publicKey, closeHash);
 
-    // Register first so there is something to close.
     await program.methods
       .registerDiscovery(toFixedArray(closeHash), testMetadata)
       .accounts({ researcher: researcher.publicKey, discoveryRecord: pda })
@@ -146,7 +176,6 @@ describe("solsci", () => {
     const balanceAfter = await provider.connection.getBalance(researcher.publicKey);
     assert.isAbove(balanceAfter, balanceBefore, "rent should be returned to researcher");
 
-    // Account must no longer exist.
     try {
       await program.account.discoveryRecord.fetch(pda);
       assert.fail("Closed account should not be fetchable");

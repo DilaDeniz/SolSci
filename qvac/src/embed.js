@@ -6,6 +6,8 @@
 
 import Qvac from "@qvac/sdk";
 
+const SCORE_THRESHOLD = 0.15; // discard near-zero similarity matches
+
 function cosine(a, b) {
   let dot = 0, na = 0, nb = 0;
   for (let i = 0; i < a.length; i++) {
@@ -21,10 +23,9 @@ function discoveryText(entry) {
     const m = JSON.parse(entry.metadata);
     return [
       m.analysis_type?.replace(/_/g, " ") ?? "",
-      m.tool ?? "",
-      m.version ?? "",
-      m.description ?? "",
-      m.reference_genome ?? "",
+      m.tool          ?? "",
+      m.version       ?? "",
+      m.description   ?? "",
     ].filter(Boolean).join(" ");
   } catch {
     return entry.metadata ?? "";
@@ -33,7 +34,8 @@ function discoveryText(entry) {
 
 /**
  * Rank `discoveries` by semantic similarity to `query`.
- * Returns the same array sorted by descending similarity score.
+ * Returns entries with _score >= SCORE_THRESHOLD, sorted descending.
+ * Falls back to the original order if the query produces no results above threshold.
  */
 export async function semanticSearch(query, discoveries) {
   if (!discoveries.length) return [];
@@ -42,20 +44,24 @@ export async function semanticSearch(query, discoveries) {
   await qvac.loadModel("embed");
 
   try {
-    const texts  = discoveries.map(discoveryText);
-    const inputs = [query, ...texts];
-
-    const vectors = await Promise.all(
-      inputs.map((t) => qvac.embed({ input: t }))
-    );
+    const texts   = discoveries.map(discoveryText);
+    const inputs  = [query, ...texts];
+    const vectors = await Promise.all(inputs.map((t) => qvac.embed({ input: t })));
 
     const queryVec = vectors[0];
-    return discoveries
-      .map((entry, i) => ({
-        ...entry,
-        _score: cosine(queryVec, vectors[i + 1]),
-      }))
+    const scored   = discoveries.map((entry, i) => ({
+      ...entry,
+      _score: cosine(queryVec, vectors[i + 1]),
+    }));
+
+    const filtered = scored
+      .filter((e) => e._score >= SCORE_THRESHOLD)
       .sort((a, b) => b._score - a._score);
+
+    // If nothing clears the threshold, return all sorted by score anyway
+    return filtered.length > 0
+      ? filtered
+      : scored.sort((a, b) => b._score - a._score);
   } finally {
     await qvac.unloadModel("embed");
   }
