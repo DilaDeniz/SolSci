@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
@@ -7,6 +7,8 @@ import idl from "../idl/solsci.json";
 
 const PROGRAM_ID    = new PublicKey((idl as any).address);
 const QVAC_BASE_URL = "http://localhost:3001";
+const META_LIMIT    = 512;
+const IS_MOBILE     = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent);
 
 const ANALYSIS_TYPES = [
   // Life sciences
@@ -89,8 +91,32 @@ async function readTextSample(file: File, bytes = 4096): Promise<string> {
   catch { return ""; }
 }
 
-function isMobile() {
-  return /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent);
+function byteLen(s: string) {
+  return new TextEncoder().encode(s).length;
+}
+
+/** Read-only fake signer for accounts-only queries (no tx signing needed). */
+function readonlyWallet(pk: PublicKey) {
+  return {
+    publicKey:           pk,
+    signTransaction:     async (t: any) => t,
+    signAllTransactions: async (ts: any) => ts,
+  };
+}
+
+// ── Copy hook ─────────────────────────────────────────────────────────────────
+
+function useCopy() {
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copy = useCallback((text: string, key: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1500);
+    });
+  }, []);
+
+  return { copy, copiedKey };
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -99,6 +125,7 @@ export default function Dashboard() {
   const { connection } = useConnection();
   const wallet         = useWallet();
   const [tab, setTab]  = useState<Tab>("register");
+  const { copy, copiedKey } = useCopy();
 
   // ── QVAC ──────────────────────────────────────────────────────────────────
   const [qvacOnline, setQvacOnline] = useState(false);
@@ -140,6 +167,19 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searching,   setSearching]   = useState(false);
 
+  // ── Live metadata byte count ───────────────────────────────────────────────
+
+  const metadataBytes = useMemo(() => {
+    const obj = {
+      analysis_type: analysisType,
+      ...(toolName    ? { tool: toolName }       : {}),
+      ...(toolVersion ? { version: toolVersion } : {}),
+      ...(description ? { description }          : {}),
+      ...(file ? { file_name: file.name, file_size_bytes: file.size } : {}),
+    };
+    return byteLen(JSON.stringify(obj));
+  }, [analysisType, toolName, toolVersion, description, file]);
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   async function hashFile(f: File): Promise<Uint8Array> {
@@ -151,10 +191,10 @@ export default function Dashboard() {
     return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
   }
 
-  function getProgram() {
+  const getProgram = useCallback(() => {
     const provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
     return new Program(idl as Idl, provider);
-  }
+  }, [connection, wallet]);
 
   function metaField(metaStr: string, key: string): string {
     try { return JSON.parse(metaStr)[key] ?? ""; }
@@ -181,7 +221,7 @@ export default function Dashboard() {
 
   // ── QVAC suggest ──────────────────────────────────────────────────────────
 
-  async function suggestWithAI() {
+  const suggestWithAI = useCallback(async () => {
     if (!file || !qvacOnline) return;
     setSuggesting(true);
     try {
@@ -201,7 +241,7 @@ export default function Dashboard() {
     } finally {
       setSuggesting(false);
     }
-  }
+  }, [file, qvacOnline]);
 
   // ── Register ───────────────────────────────────────────────────────────────
 
@@ -229,7 +269,7 @@ export default function Dashboard() {
     if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]);
   }, [handleFileSelect]);
 
-  async function registerDiscovery() {
+  const registerDiscovery = useCallback(async () => {
     if (!wallet.publicKey || !hashBytes || !file) return;
     setError("");
     setRegistering(true);
@@ -245,9 +285,10 @@ export default function Dashboard() {
         file_size_bytes: file.size,
       });
 
-      if (new TextEncoder().encode(metadata).length > 512) {
+      if (byteLen(metadata) > META_LIMIT) {
         setError("Metadata too long (> 512 bytes). Shorten description or file name.");
         setRegistering(false);
+        setStatus("");
         return;
       }
 
@@ -272,16 +313,16 @@ export default function Dashboard() {
     } finally {
       setRegistering(false);
     }
-  }
+  }, [wallet.publicKey, hashBytes, file, analysisType, toolName, toolVersion, description, fileHash, getProgram]);
 
   // ── Verify ─────────────────────────────────────────────────────────────────
 
-  async function handleVerifyFileSelect(f: File) {
+  const handleVerifyFileSelect = useCallback(async (f: File) => {
     const bytes = await hashFile(f);
     setVerifyHash(bytesToHex(bytes));
-  }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function runVerify() {
+  const runVerify = useCallback(async () => {
     setVerifyError("");
     setVerifyResult(null);
     const hashHex = verifyHash.trim().toLowerCase();
@@ -297,7 +338,7 @@ export default function Dashboard() {
     try {
       const provider = new AnchorProvider(
         connection,
-        wallet.publicKey ? (wallet as any) : { publicKey: researcherKey, signTransaction: async (t: any) => t, signAllTransactions: async (t: any) => t },
+        wallet.publicKey ? (wallet as any) : readonlyWallet(researcherKey),
         { commitment: "confirmed" }
       );
       const program = new Program(idl as Idl, provider);
@@ -313,18 +354,19 @@ export default function Dashboard() {
     } finally {
       setVerifying(false);
     }
-  }
+  }, [verifyHash, verifyWallet, connection, wallet]);
 
   // ── Feed ───────────────────────────────────────────────────────────────────
 
-  async function loadFeed() {
+  const loadFeed = useCallback(async () => {
     setFeedLoading(true);
     setFeedError("");
     setSearchQuery("");
     try {
+      const pk = wallet.publicKey ?? PublicKey.default;
       const provider = new AnchorProvider(
         connection,
-        wallet.publicKey ? (wallet as any) : { publicKey: PublicKey.default, signTransaction: async (t: any) => t, signAllTransactions: async (t: any) => t },
+        wallet.publicKey ? (wallet as any) : readonlyWallet(pk),
         { commitment: "confirmed" }
       );
       const program  = new Program(idl as Idl, provider);
@@ -346,9 +388,9 @@ export default function Dashboard() {
     } finally {
       setFeedLoading(false);
     }
-  }
+  }, [connection, wallet]);
 
-  async function runSemanticSearch() {
+  const runSemanticSearch = useCallback(async () => {
     if (!searchQuery.trim() || !qvacOnline) return;
     setSearching(true);
     try {
@@ -363,11 +405,14 @@ export default function Dashboard() {
     } finally {
       setSearching(false);
     }
-  }
+  }, [searchQuery, qvacOnline, feedRaw]);
 
   useEffect(() => { if (tab === "feed") loadFeed(); }, [tab]); // eslint-disable-line
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  const metaOver = metadataBytes > META_LIMIT;
+  const metaPct  = Math.min(metadataBytes / META_LIMIT, 1);
 
   return (
     <div className="app">
@@ -388,7 +433,7 @@ export default function Dashboard() {
       </header>
 
       {/* ── Mobile wallet notice ── */}
-      {isMobile() && !wallet.connected && (
+      {IS_MOBILE && !wallet.connected && (
         <div className="notice">
           <strong>Mobile:</strong> open this URL inside the <strong>Phantom</strong> or <strong>Solflare</strong> app browser, or connect via the button above.
         </div>
@@ -446,6 +491,10 @@ export default function Dashboard() {
                 <div className="hash-box">
                   <span className="hash-label">SHA-256</span>
                   <span className="hash-val">{fileHash}</span>
+                  <button className="copy-btn" title="Copy hash"
+                    onClick={() => copy(fileHash, "hash")}>
+                    {copiedKey === "hash" ? "✓" : "⎘"}
+                  </button>
                 </div>
               )}
             </div>
@@ -488,6 +537,16 @@ export default function Dashboard() {
                     <span>Description <span className="field-opt">(optional)</span></span>
                     <input type="text" value={description} placeholder="One sentence about what this output contains" onChange={(e) => setDescription(e.target.value)} />
                   </label>
+
+                  {/* Live byte counter */}
+                  <div className="meta-counter">
+                    <div className="meta-bar">
+                      <div className="meta-bar-fill" style={{ width: `${metaPct * 100}%`, background: metaOver ? "#f87171" : metaPct > 0.8 ? "#fbbf24" : "#14f195" }} />
+                    </div>
+                    <span className={`meta-count${metaOver ? " over" : ""}`}>
+                      {metadataBytes} / {META_LIMIT} bytes
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
@@ -506,7 +565,7 @@ export default function Dashboard() {
                     <WalletMultiButton />
                   </div>
                 ) : (
-                  <button className="btn-primary" disabled={registering} onClick={registerDiscovery}>
+                  <button className="btn-primary" disabled={registering || metaOver} onClick={registerDiscovery}>
                     {registering ? <><span className="spin" />{status || "Registering…"}</> : "Register discovery →"}
                   </button>
                 )}
@@ -524,10 +583,13 @@ export default function Dashboard() {
                   <span>Certificate of Discovery</span>
                 </div>
                 <div className="cert-body">
-                  <CertRow label="Certificate (PDA)" value={certificate.pda} mono />
+                  <CertRow label="Certificate (PDA)" value={certificate.pda} mono
+                    onCopy={() => copy(certificate.pda, "pda")} copied={copiedKey === "pda"} />
                   <CertRow label="Transaction"
-                    value={<a href={`https://explorer.solana.com/tx/${certificate.txSig}?cluster=devnet`} target="_blank" rel="noreferrer">{certificate.txSig.slice(0, 20)}… ↗</a>} />
-                  <CertRow label="File hash" value={certificate.fileHash} mono />
+                    value={<a href={`https://explorer.solana.com/tx/${certificate.txSig}?cluster=devnet`} target="_blank" rel="noreferrer">{certificate.txSig.slice(0, 20)}… ↗</a>}
+                    onCopy={() => copy(certificate.txSig, "tx")} copied={copiedKey === "tx"} />
+                  <CertRow label="File hash" value={certificate.fileHash} mono
+                    onCopy={() => copy(certificate.fileHash, "cert-hash")} copied={copiedKey === "cert-hash"} />
                   <CertRow label="Timestamp" value={new Date(certificate.timestamp * 1000).toUTCString()} />
                   <CertRow label="Metadata" value={renderMeta(certificate.metadata)} />
                 </div>
@@ -577,8 +639,10 @@ export default function Dashboard() {
                     <span>Verified on-chain</span>
                   </div>
                   <div className="cert-body">
-                    <CertRow label="Certificate (PDA)" value={verifyResult.pda!} mono />
-                    <CertRow label="Researcher" value={verifyResult.researcher!} mono />
+                    <CertRow label="Certificate (PDA)" value={verifyResult.pda!} mono
+                      onCopy={() => copy(verifyResult.pda!, "v-pda")} copied={copiedKey === "v-pda"} />
+                    <CertRow label="Researcher" value={verifyResult.researcher!} mono
+                      onCopy={() => copy(verifyResult.researcher!, "v-res")} copied={copiedKey === "v-res"} />
                     <CertRow label="Registered" value={new Date(verifyResult.timestamp! * 1000).toUTCString()} />
                     <CertRow label="Metadata" value={renderMeta(verifyResult.metadata!)} />
                   </div>
@@ -659,11 +723,20 @@ export default function Dashboard() {
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
-function CertRow({ label, value, mono }: { label: string; value: any; mono?: boolean }) {
+function CertRow({
+  label, value, mono, onCopy, copied
+}: {
+  label: string; value: any; mono?: boolean; onCopy?: () => void; copied?: boolean;
+}) {
   return (
     <div className="cert-row">
       <span className="cert-key">{label}</span>
       <span className={`cert-val${mono ? " mono" : ""}`}>{value}</span>
+      {onCopy && (
+        <button className="copy-btn" title="Copy" onClick={onCopy}>
+          {copied ? "✓" : "⎘"}
+        </button>
+      )}
     </div>
   );
 }

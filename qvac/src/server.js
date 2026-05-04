@@ -16,7 +16,14 @@ import { semanticSearch  } from "./embed.js";
 const app  = express();
 const PORT = 3001;
 
-app.use(cors({ origin: "http://localhost:3000" }));
+const ALLOWED_ORIGINS = [
+  "http://localhost:3000",
+  "http://localhost:5173",
+  "https://solsci-app.vercel.app",
+];
+app.use(cors({
+  origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin)),
+}));
 app.use(express.json({ limit: "1mb" }));
 
 // ── Health ────────────────────────────────────────────────────────────────────
