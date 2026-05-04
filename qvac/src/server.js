@@ -8,6 +8,7 @@
  *   POST /api/search    { query, discoveries[] }  → discoveries ranked by similarity
  *   POST /api/transcribe { audio: base64 }        → { text } (Whisper STT)
  *   POST /api/ocr       { image: base64 }         → { text } (on-device OCR)
+ *   POST /api/translate { text }                  → { text } (on-device translation → English)
  */
 
 import express from "express";
@@ -16,6 +17,7 @@ import { suggestMetadata }       from "./assist.js";
 import { semanticSearch }        from "./embed.js";
 import { transcribeAudio }       from "./transcribe.js";
 import { extractTextFromImage }  from "./ocr.js";
+import { translateToEnglish }    from "./translate.js";
 
 const app  = express();
 const PORT = 3001;
@@ -101,6 +103,22 @@ app.post("/api/ocr", async (req, res) => {
   }
 });
 
+// ── Translation ───────────────────────────────────────────────────────────────
+
+app.post("/api/translate", async (req, res) => {
+  const { text } = req.body ?? {};
+  if (!text || typeof text !== "string") {
+    return res.status(400).json({ error: "text required" });
+  }
+  try {
+    const translated = await translateToEnglish(text);
+    res.json({ text: translated });
+  } catch (err) {
+    console.error("[translate]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
@@ -110,4 +128,5 @@ app.listen(PORT, () => {
   console.log("  POST /api/search      — semantic search (embeddings)");
   console.log("  POST /api/transcribe  — speech-to-text (Whisper, local)");
   console.log("  POST /api/ocr         — image OCR (ONNX, local)");
+  console.log("  POST /api/translate   — translate any language → English (local)");
 });

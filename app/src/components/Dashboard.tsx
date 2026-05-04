@@ -173,6 +173,9 @@ export default function Dashboard() {
   const [ocrRunning, setOcrRunning]   = useState(false);
   const [ocrText, setOcrText]         = useState("");
 
+  // ── Translate state ───────────────────────────────────────────────────────
+  const [translating, setTranslating] = useState(false);
+
   // ── Verify state ──────────────────────────────────────────────────────────
   const [verifyHash,    setVerifyHash]    = useState("");
   const [verifyWallet,  setVerifyWallet]  = useState("");
@@ -342,6 +345,28 @@ export default function Dashboard() {
       setOcrRunning(false);
     }
   }, [file, qvacOnline, suggestWithAI]);
+
+  // ── QVAC: Translation ────────────────────────────────────────────────────
+
+  const translateDescription = useCallback(async () => {
+    if (!description.trim() || !qvacOnline) return;
+    setTranslating(true);
+    setError("");
+    try {
+      const res = await fetch(`${QVAC_BASE_URL}/api/translate`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ text: description }),
+      });
+      const { text, error: tErr } = await res.json();
+      if (tErr) throw new Error(tErr);
+      if (text) setDescription(text);
+    } catch (e: any) {
+      setError(`Translation failed: ${e.message}`);
+    } finally {
+      setTranslating(false);
+    }
+  }, [description, qvacOnline]);
 
   // ── Register ──────────────────────────────────────────────────────────────
 
@@ -727,7 +752,7 @@ export default function Dashboard() {
 
                   {/* Description with mic button */}
                   <label className="field">
-                    <span>Description <span className="field-opt">(optional)</span></span>
+                    <span>Description <span className="field-opt">(optional — any language, translate ↔ EN on-device)</span></span>
                     <div className="desc-row">
                       <input
                         type="text"
@@ -736,18 +761,30 @@ export default function Dashboard() {
                         onChange={(e) => setDescription(e.target.value)}
                       />
                       {qvacOnline && (
-                        <button
-                          className={`mic-btn${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
-                          title={recording ? "Stop recording" : "Record description (Whisper STT)"}
-                          disabled={transcribing}
-                          onClick={toggleRecording}
-                        >
-                          {transcribing
-                            ? <span className="spin spin-sm" />
-                            : recording
-                            ? <MicIcon active />
-                            : <MicIcon />}
-                        </button>
+                        <>
+                          <button
+                            className={`mic-btn${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
+                            title={recording ? "Stop recording" : "Record description (Whisper STT)"}
+                            disabled={transcribing}
+                            onClick={toggleRecording}
+                          >
+                            {transcribing
+                              ? <span className="spin spin-sm" />
+                              : recording
+                              ? <MicIcon active />
+                              : <MicIcon />}
+                          </button>
+                          {description.trim() && (
+                            <button
+                              className="mic-btn"
+                              title="Translate description to English (on-device)"
+                              disabled={translating}
+                              onClick={translateDescription}
+                            >
+                              {translating ? <span className="spin spin-sm" /> : <TranslateIcon />}
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                     {recording && (
@@ -1033,6 +1070,19 @@ function MicIcon({ active }: { active?: boolean }) {
       <path d="M5 10a7 7 0 0 0 14 0" />
       <line x1="12" y1="17" x2="12" y2="22" />
       <line x1="8"  y1="22" x2="16" y2="22" />
+    </svg>
+  );
+}
+
+function TranslateIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 8l6 6" />
+      <path d="M4 14l6-6 2-3" />
+      <path d="M2 5h12" />
+      <path d="M7 2h1" />
+      <path d="M22 22l-5-10-5 10" />
+      <path d="M14 18h6" />
     </svg>
   );
 }
