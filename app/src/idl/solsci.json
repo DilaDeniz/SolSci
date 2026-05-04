@@ -10,26 +10,20 @@
     {
       "name": "close_discovery",
       "docs": [
-        "Close a discovery record and return the rent lamports to the researcher.",
+        "Close a discovery record and return rent to the current owner.",
         "",
-        "Only the original researcher can close their own record. The `close`",
-        "constraint handles the lamport transfer automatically."
+        "Only the current `owner` can close the record (not necessarily the",
+        "original researcher after a transfer)."
       ],
-      "discriminator": [
-        68,
-        228,
-        43,
-        231,
-        210,
-        107,
-        157,
-        241
-      ],
+      "discriminator": [68, 228, 43, 231, 210, 107, 157, 241],
       "accounts": [
         {
-          "name": "researcher",
+          "name": "owner",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "researcher"
         },
         {
           "name": "discovery_record",
@@ -38,17 +32,7 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  100,
-                  105,
-                  115,
-                  99,
-                  111,
-                  118,
-                  101,
-                  114,
-                  121
-                ]
+                "value": [100, 105, 115, 99, 111, 118, 101, 114, 121]
               },
               {
                 "kind": "account",
@@ -66,10 +50,7 @@
         {
           "name": "_file_hash",
           "type": {
-            "array": [
-              "u8",
-              32
-            ]
+            "array": ["u8", 32]
           }
         }
       ]
@@ -79,19 +60,11 @@
       "docs": [
         "Register a new scientific discovery on-chain.",
         "",
-        "Creates a PDA keyed by `(researcher, file_hash)` so the same researcher",
-        "cannot overwrite an existing record for the same file hash."
+        "Creates a PDA keyed by `(researcher, file_hash)`. The registrant becomes",
+        "both the original `researcher` (immutable) and the initial `owner`",
+        "(transferable)."
       ],
-      "discriminator": [
-        63,
-        188,
-        175,
-        73,
-        49,
-        157,
-        163,
-        63
-      ],
+      "discriminator": [63, 188, 175, 73, 49, 157, 163, 63],
       "accounts": [
         {
           "name": "researcher",
@@ -105,17 +78,7 @@
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  100,
-                  105,
-                  115,
-                  99,
-                  111,
-                  118,
-                  101,
-                  114,
-                  121
-                ]
+                "value": [100, 105, 115, 99, 111, 118, 101, 114, 121]
               },
               {
                 "kind": "account",
@@ -137,10 +100,7 @@
         {
           "name": "file_hash",
           "type": {
-            "array": [
-              "u8",
-              32
-            ]
+            "array": ["u8", 32]
           }
         },
         {
@@ -150,44 +110,34 @@
       ]
     },
     {
-      "name": "verify_discovery",
+      "name": "transfer_discovery",
       "docs": [
-        "Verify an existing discovery record by emitting a `DiscoveryVerified` event.",
+        "Transfer ownership of a discovery to a new wallet.",
         "",
-        "Read-only in effect — useful for CPI calls from other protocols that need",
-        "to assert a discovery exists without fetching the account themselves."
+        "The original `researcher` field and `timestamp` are preserved forever —",
+        "only `owner` changes. The current owner must sign."
       ],
-      "discriminator": [
-        165,
-        40,
-        125,
-        103,
-        133,
-        125,
-        85,
-        103
-      ],
+      "discriminator": [67, 115, 169, 238, 78, 78, 248, 31],
       "accounts": [
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "new_owner"
+        },
         {
           "name": "researcher"
         },
         {
           "name": "discovery_record",
+          "writable": true,
           "pda": {
             "seeds": [
               {
                 "kind": "const",
-                "value": [
-                  100,
-                  105,
-                  115,
-                  99,
-                  111,
-                  118,
-                  101,
-                  114,
-                  121
-                ]
+                "value": [100, 105, 115, 99, 111, 118, 101, 114, 121]
               },
               {
                 "kind": "account",
@@ -205,10 +155,48 @@
         {
           "name": "_file_hash",
           "type": {
-            "array": [
-              "u8",
-              32
+            "array": ["u8", 32]
+          }
+        }
+      ]
+    },
+    {
+      "name": "verify_discovery",
+      "docs": [
+        "Verify an existing discovery record by emitting a `DiscoveryVerified` event.",
+        "",
+        "Read-only in effect — useful for CPI calls from other protocols."
+      ],
+      "discriminator": [165, 40, 125, 103, 133, 125, 85, 103],
+      "accounts": [
+        {
+          "name": "researcher"
+        },
+        {
+          "name": "discovery_record",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [100, 105, 115, 99, 111, 118, 101, 114, 121]
+              },
+              {
+                "kind": "account",
+                "path": "researcher"
+              },
+              {
+                "kind": "arg",
+                "path": "file_hash"
+              }
             ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "_file_hash",
+          "type": {
+            "array": ["u8", 32]
           }
         }
       ]
@@ -217,44 +205,21 @@
   "accounts": [
     {
       "name": "DiscoveryRecord",
-      "discriminator": [
-        245,
-        152,
-        169,
-        214,
-        121,
-        7,
-        209,
-        179
-      ]
+      "discriminator": [245, 152, 169, 214, 121, 7, 209, 179]
     }
   ],
   "events": [
     {
       "name": "DiscoveryRegistered",
-      "discriminator": [
-        248,
-        127,
-        46,
-        26,
-        185,
-        205,
-        47,
-        204
-      ]
+      "discriminator": [248, 127, 46, 26, 185, 205, 47, 204]
+    },
+    {
+      "name": "DiscoveryTransferred",
+      "discriminator": [36, 38, 69, 76, 212, 237, 116, 157]
     },
     {
       "name": "DiscoveryVerified",
-      "discriminator": [
-        237,
-        74,
-        97,
-        219,
-        137,
-        190,
-        228,
-        185
-      ]
+      "discriminator": [237, 74, 97, 219, 137, 190, 228, 185]
     }
   ],
   "errors": [
@@ -267,6 +232,11 @@
       "code": 6001,
       "name": "MetadataEmpty",
       "msg": "Metadata must not be empty"
+    },
+    {
+      "code": 6002,
+      "name": "NotOwner",
+      "msg": "Only the current owner can perform this action"
     }
   ],
   "types": [
@@ -280,12 +250,13 @@
             "type": "pubkey"
           },
           {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
             "name": "file_hash",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           },
           {
@@ -298,9 +269,6 @@
           },
           {
             "name": "bump",
-            "docs": [
-              "Stored for cheap PDA re-derivation in CPI callers."
-            ],
             "type": "u8"
           }
         ]
@@ -316,12 +284,13 @@
             "type": "pubkey"
           },
           {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
             "name": "file_hash",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           },
           {
@@ -340,6 +309,30 @@
       }
     },
     {
+      "name": "DiscoveryTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "certificate_id",
+            "type": "pubkey"
+          },
+          {
+            "name": "from",
+            "type": "pubkey"
+          },
+          {
+            "name": "to",
+            "type": "pubkey"
+          },
+          {
+            "name": "researcher",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
       "name": "DiscoveryVerified",
       "type": {
         "kind": "struct",
@@ -349,12 +342,13 @@
             "type": "pubkey"
           },
           {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
             "name": "file_hash",
             "type": {
-              "array": [
-                "u8",
-                32
-              ]
+              "array": ["u8", 32]
             }
           },
           {

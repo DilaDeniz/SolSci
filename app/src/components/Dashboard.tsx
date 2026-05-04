@@ -59,6 +59,7 @@ interface VerifyResult {
   found: boolean;
   pda?: string;
   researcher?: string;
+  owner?: string;
   timestamp?: number;
   metadata?: string;
 }
@@ -66,6 +67,7 @@ interface VerifyResult {
 interface FeedEntry {
   pda: string;
   researcher: string;
+  owner: string;
   fileHash: string;
   timestamp: number;
   metadata: string;
@@ -178,6 +180,10 @@ export default function Dashboard() {
   const [verifyError,   setVerifyError]   = useState("");
   const [verifying,     setVerifying]     = useState(false);
   const [fetchVerifying, setFetchVerifying] = useState(false);
+  const [transferTo,    setTransferTo]    = useState("");
+  const [transferring,  setTransferring]  = useState(false);
+  const [transferError, setTransferError] = useState("");
+  const [transferDone,  setTransferDone]  = useState(false);
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
   // ── Feed state ────────────────────────────────────────────────────────────
@@ -444,7 +450,10 @@ export default function Dashboard() {
         PROGRAM_ID
       );
       const record = await (program.account as any).discoveryRecord.fetch(pda);
-      setVerifyResult({ found: true, pda: pda.toBase58(), researcher: record.researcher.toBase58(), timestamp: record.timestamp.toNumber(), metadata: record.metadata });
+      setVerifyResult({ found: true, pda: pda.toBase58(), researcher: record.researcher.toBase58(), owner: record.owner?.toBase58() ?? record.researcher.toBase58(), timestamp: record.timestamp.toNumber(), metadata: record.metadata });
+      setTransferTo("");
+      setTransferError("");
+      setTransferDone(false);
     } catch (e: any) {
       if (e?.message?.includes("Account does not exist")) setVerifyResult({ found: false });
       else setVerifyError(e?.message ?? "Verification failed.");
@@ -476,6 +485,43 @@ export default function Dashboard() {
     }
   }, []);
 
+  // ── Transfer ownership ────────────────────────────────────────────────────
+
+  const transferDiscovery = useCallback(async () => {
+    if (!wallet.publicKey || !verifyResult?.pda || !verifyResult.researcher) return;
+    let newOwnerKey: PublicKey;
+    try { newOwnerKey = new PublicKey(transferTo.trim()); }
+    catch { setTransferError("Invalid wallet address."); return; }
+
+    setTransferring(true);
+    setTransferError("");
+    try {
+      const program       = getProgram();
+      const hashHex       = verifyHash.trim().toLowerCase();
+      const researcherKey = new PublicKey(verifyResult.researcher);
+      const [pda]         = PublicKey.findProgramAddressSync(
+        [Buffer.from("discovery"), researcherKey.toBuffer(), Buffer.from(hashHex, "hex")],
+        PROGRAM_ID
+      );
+      await (program.methods as any)
+        .transferDiscovery(Array.from(Buffer.from(hashHex, "hex")))
+        .accounts({
+          owner:           wallet.publicKey,
+          newOwner:        newOwnerKey,
+          researcher:      researcherKey,
+          discoveryRecord: pda,
+        })
+        .rpc({ commitment: "confirmed" });
+
+      setTransferDone(true);
+      setVerifyResult((prev) => prev ? { ...prev, owner: newOwnerKey.toBase58() } : prev);
+    } catch (e: any) {
+      setTransferError(e?.message ?? "Transfer failed.");
+    } finally {
+      setTransferring(false);
+    }
+  }, [wallet.publicKey, verifyResult, verifyHash, transferTo, getProgram]);
+
   // ── Feed ──────────────────────────────────────────────────────────────────
 
   const loadFeed = useCallback(async () => {
@@ -495,6 +541,7 @@ export default function Dashboard() {
         .map((a: any) => ({
           pda:        a.publicKey.toBase58(),
           researcher: a.account.researcher.toBase58(),
+          owner:      (a.account.owner ?? a.account.researcher).toBase58(),
           fileHash:   Buffer.from(a.account.fileHash).toString("hex"),
           timestamp:  a.account.timestamp.toNumber(),
           metadata:   a.account.metadata,
@@ -830,6 +877,10 @@ export default function Dashboard() {
                       onCopy={() => copy(verifyResult.pda!, "v-pda")} copied={copiedKey === "v-pda"} />
                     <CertRow label="Researcher" value={verifyResult.researcher!} mono
                       onCopy={() => copy(verifyResult.researcher!, "v-res")} copied={copiedKey === "v-res"} />
+                    {verifyResult.owner && verifyResult.owner !== verifyResult.researcher && (
+                      <CertRow label="Current owner" value={verifyResult.owner} mono
+                        onCopy={() => copy(verifyResult.owner!, "v-own")} copied={copiedKey === "v-own"} />
+                    )}
                     <CertRow label="Registered" value={new Date(verifyResult.timestamp! * 1000).toUTCString()} />
                     <CertRow label="Metadata" value={renderMeta(verifyResult.metadata!)} />
                   </div>
@@ -859,6 +910,36 @@ export default function Dashboard() {
                           ? <><span className="spin" /> Fetching…</>
                           : "↓ Fetch file & verify hash"}
                       </button>
+                    </div>
+                  )}
+                  {/* Transfer ownership — only shown to current owner */}
+                  {wallet.connected && wallet.publicKey?.toBase58() === (verifyResult.owner ?? verifyResult.researcher) && (
+                    <div className="transfer-section">
+                      <div className="transfer-header">Transfer ownership</div>
+                      {transferDone ? (
+                        <p className="msg-info">Ownership transferred to {transferTo.trim()}.</p>
+                      ) : (
+                        <>
+                          <div className="transfer-row">
+                            <input
+                              type="text"
+                              className="mono"
+                              value={transferTo}
+                              placeholder="New owner wallet address"
+                              onChange={(e) => setTransferTo(e.target.value)}
+                            />
+                            <button
+                              className="btn-primary"
+                              disabled={transferring || !transferTo.trim()}
+                              onClick={transferDiscovery}
+                            >
+                              {transferring ? <><span className="spin" />Transferring…</> : "Transfer →"}
+                            </button>
+                          </div>
+                          {transferError && <p className="msg-error">{transferError}</p>}
+                          <p className="transfer-hint">The original researcher is preserved on-chain — only the owner changes.</p>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

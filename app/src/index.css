@@ -772,6 +772,40 @@ body {
 
 .meta-count.over { color: #f87171; }
 
+/* ── Transfer section ── */
+.transfer-section {
+  border-top: 1px solid #1e1e30;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+}
+
+.transfer-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+  margin-bottom: 0.75rem;
+}
+
+.transfer-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.transfer-row input {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+}
+
+.transfer-hint {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: #475569;
+}
+
 /* ── Mono util ── */
 .mono { font-family: monospace; font-size: 0.8rem !important; }
 
