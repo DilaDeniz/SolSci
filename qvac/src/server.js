@@ -3,15 +3,19 @@
  * Runs on http://localhost:3001 — all inference is on-device via QVAC SDK.
  *
  * Endpoints:
+ *   GET  /api/health                              → { ok: true }
  *   POST /api/suggest   { fileName, fileSample? } → metadata suggestion JSON
  *   POST /api/search    { query, discoveries[] }  → discoveries ranked by similarity
- *   GET  /api/health                              → { ok: true }
+ *   POST /api/transcribe { audio: base64 }        → { text } (Whisper STT)
+ *   POST /api/ocr       { image: base64 }         → { text } (on-device OCR)
  */
 
 import express from "express";
 import cors    from "cors";
-import { suggestMetadata } from "./assist.js";
-import { semanticSearch  } from "./embed.js";
+import { suggestMetadata }       from "./assist.js";
+import { semanticSearch }        from "./embed.js";
+import { transcribeAudio }       from "./transcribe.js";
+import { extractTextFromImage }  from "./ocr.js";
 
 const app  = express();
 const PORT = 3001;
@@ -21,10 +25,13 @@ const ALLOWED_ORIGINS = [
   "http://localhost:5173",
   "https://solsci-app.vercel.app",
 ];
+
 app.use(cors({
   origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin)),
 }));
-app.use(express.json({ limit: "1mb" }));
+
+// 10 MB body limit — audio recordings and images can be several MB as base64
+app.use(express.json({ limit: "10mb" }));
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
@@ -34,14 +41,11 @@ app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 app.post("/api/suggest", async (req, res) => {
   const { fileName, fileSample } = req.body ?? {};
-
   if (!fileName || typeof fileName !== "string") {
     return res.status(400).json({ error: "fileName required" });
   }
-
   try {
-    const suggestion = await suggestMetadata(fileName, fileSample ?? "");
-    res.json(suggestion);
+    res.json(await suggestMetadata(fileName, fileSample ?? ""));
   } catch (err) {
     console.error("[suggest]", err.message);
     res.status(500).json({ error: err.message });
@@ -52,16 +56,47 @@ app.post("/api/suggest", async (req, res) => {
 
 app.post("/api/search", async (req, res) => {
   const { query, discoveries } = req.body ?? {};
-
   if (!query || !Array.isArray(discoveries)) {
     return res.status(400).json({ error: "query and discoveries[] required" });
   }
-
   try {
-    const ranked = await semanticSearch(query, discoveries);
-    res.json(ranked);
+    res.json(await semanticSearch(query, discoveries));
   } catch (err) {
     console.error("[search]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Speech-to-text (Whisper) ──────────────────────────────────────────────────
+
+app.post("/api/transcribe", async (req, res) => {
+  const { audio } = req.body ?? {};
+  if (!audio || typeof audio !== "string") {
+    return res.status(400).json({ error: "audio (base64) required" });
+  }
+  try {
+    const buffer = Buffer.from(audio, "base64");
+    const text   = await transcribeAudio(buffer);
+    res.json({ text });
+  } catch (err) {
+    console.error("[transcribe]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── OCR ───────────────────────────────────────────────────────────────────────
+
+app.post("/api/ocr", async (req, res) => {
+  const { image } = req.body ?? {};
+  if (!image || typeof image !== "string") {
+    return res.status(400).json({ error: "image (base64) required" });
+  }
+  try {
+    const buffer = Buffer.from(image, "base64");
+    const text   = await extractTextFromImage(buffer);
+    res.json({ text });
+  } catch (err) {
+    console.error("[ocr]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -69,7 +104,10 @@ app.post("/api/search", async (req, res) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
-  console.log(`SolSci QVAC server running on http://localhost:${PORT}`);
-  console.log("  POST /api/suggest  — AI metadata suggestions (Llama 3.2 1B, local)");
-  console.log("  POST /api/search   — semantic search over discoveries (embeddings, local)");
+  console.log(`SolSci QVAC server  →  http://localhost:${PORT}`);
+  console.log("  GET  /api/health      — server status");
+  console.log("  POST /api/suggest     — AI metadata suggestions (Llama 3.2 1B)");
+  console.log("  POST /api/search      — semantic search (embeddings)");
+  console.log("  POST /api/transcribe  — speech-to-text (Whisper, local)");
+  console.log("  POST /api/ocr         — image OCR (ONNX, local)");
 });

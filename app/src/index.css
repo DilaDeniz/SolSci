@@ -586,6 +586,111 @@ body {
 
 .feed-link:hover { opacity: 0.75; }
 
+/* ── Description row with mic ── */
+.desc-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.desc-row input {
+  flex: 1;
+}
+
+/* ── Mic button ── */
+.mic-btn {
+  background: #1a1a28;
+  border: 1px solid #2a2a3e;
+  border-radius: 7px;
+  color: #64748b;
+  cursor: pointer;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.mic-btn:hover:not(:disabled) {
+  border-color: #9945ff;
+  color: #e2e8f0;
+}
+
+.mic-btn.recording {
+  background: #f871711a;
+  border-color: #f8717150;
+  color: #f87171;
+  animation: pulse-border 1.2s ease-in-out infinite;
+}
+
+.mic-btn.transcribing {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes pulse-border {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
+  50%       { box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.2); }
+}
+
+/* ── Recording hint ── */
+.mic-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-top: 0.35rem;
+}
+
+.rec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f87171;
+  animation: blink-rec 1s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes blink-rec { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+/* ── Step actions row ── */
+.step-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* ── OCR preview ── */
+.ocr-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.85rem;
+  background: rgba(56, 189, 248, 0.05);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  border-radius: 7px;
+}
+
+.ocr-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #38bdf8;
+}
+
+.ocr-snippet {
+  font-size: 0.78rem;
+  color: #94a3b8;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 /* ── Copy button ── */
 .copy-btn {
   background: none;

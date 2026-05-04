@@ -91,11 +91,18 @@ async function readTextSample(file: File, bytes = 4096): Promise<string> {
   catch { return ""; }
 }
 
+async function fileToBase64(file: File): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
 function byteLen(s: string) {
   return new TextEncoder().encode(s).length;
 }
 
-/** Read-only fake signer for accounts-only queries (no tx signing needed). */
 function readonlyWallet(pk: PublicKey) {
   return {
     publicKey:           pk,
@@ -104,18 +111,20 @@ function readonlyWallet(pk: PublicKey) {
   };
 }
 
+function isImageFile(file: File) {
+  return file.type.startsWith("image/");
+}
+
 // ── Copy hook ─────────────────────────────────────────────────────────────────
 
 function useCopy() {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-
   const copy = useCallback((text: string, key: string) => {
     navigator.clipboard.writeText(text).then(() => {
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 1500);
     });
   }, []);
-
   return { copy, copiedKey };
 }
 
@@ -127,7 +136,7 @@ export default function Dashboard() {
   const [tab, setTab]  = useState<Tab>("register");
   const { copy, copiedKey } = useCopy();
 
-  // ── QVAC ──────────────────────────────────────────────────────────────────
+  // ── QVAC health ───────────────────────────────────────────────────────────
   const [qvacOnline, setQvacOnline] = useState(false);
   useEffect(() => {
     fetch(`${QVAC_BASE_URL}/api/health`, { signal: AbortSignal.timeout(600) })
@@ -135,23 +144,33 @@ export default function Dashboard() {
       .catch(() => setQvacOnline(false));
   }, []);
 
-  // ── Register state ─────────────────────────────────────────────────────────
-  const [file, setFile]           = useState<File | null>(null);
-  const [fileHash, setFileHash]   = useState("");
-  const [hashBytes, setHashBytes] = useState<Uint8Array | null>(null);
+  // ── Register state ────────────────────────────────────────────────────────
+  const [file, setFile]               = useState<File | null>(null);
+  const [fileHash, setFileHash]       = useState("");
+  const [hashBytes, setHashBytes]     = useState<Uint8Array | null>(null);
   const [analysisType, setAnalysisType] = useState("experiment");
-  const [toolName, setToolName]   = useState("");
+  const [toolName, setToolName]       = useState("");
   const [toolVersion, setToolVersion] = useState("");
   const [description, setDescription] = useState("");
-  const [status, setStatus]       = useState("");
-  const [error, setError]         = useState("");
+  const [status, setStatus]           = useState("");
+  const [error, setError]             = useState("");
   const [certificate, setCertificate] = useState<Certificate | null>(null);
   const [registering, setRegistering] = useState(false);
-  const [dragging, setDragging]   = useState(false);
-  const [suggesting, setSuggesting] = useState(false);
+  const [dragging, setDragging]       = useState(false);
+  const [suggesting, setSuggesting]   = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // ── Verify state ───────────────────────────────────────────────────────────
+  // ── STT state ────────────────────────────────────────────────────────────
+  const [recording, setRecording]     = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef   = useRef<BlobPart[]>([]);
+
+  // ── OCR state ────────────────────────────────────────────────────────────
+  const [ocrRunning, setOcrRunning]   = useState(false);
+  const [ocrText, setOcrText]         = useState("");
+
+  // ── Verify state ──────────────────────────────────────────────────────────
   const [verifyHash,   setVerifyHash]   = useState("");
   const [verifyWallet, setVerifyWallet] = useState("");
   const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
@@ -159,7 +178,7 @@ export default function Dashboard() {
   const [verifying,    setVerifying]    = useState(false);
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
-  // ── Feed state ─────────────────────────────────────────────────────────────
+  // ── Feed state ────────────────────────────────────────────────────────────
   const [feed,        setFeed]        = useState<FeedEntry[]>([]);
   const [feedRaw,     setFeedRaw]     = useState<FeedEntry[]>([]);
   const [feedLoading, setFeedLoading] = useState(false);
@@ -167,8 +186,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searching,   setSearching]   = useState(false);
 
-  // ── Live metadata byte count ───────────────────────────────────────────────
-
+  // ── Live metadata byte count ──────────────────────────────────────────────
   const metadataBytes = useMemo(() => {
     const obj = {
       analysis_type: analysisType,
@@ -180,7 +198,7 @@ export default function Dashboard() {
     return byteLen(JSON.stringify(obj));
   }, [analysisType, toolName, toolVersion, description, file]);
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Core helpers ──────────────────────────────────────────────────────────
 
   async function hashFile(f: File): Promise<Uint8Array> {
     const buf = await f.arrayBuffer();
@@ -219,13 +237,14 @@ export default function Dashboard() {
     }
   }
 
-  // ── QVAC suggest ──────────────────────────────────────────────────────────
+  // ── QVAC: AI metadata suggest ────────────────────────────────────────────
 
-  const suggestWithAI = useCallback(async () => {
+  const suggestWithAI = useCallback(async (overrideSample?: string) => {
     if (!file || !qvacOnline) return;
     setSuggesting(true);
+    setError("");
     try {
-      const fileSample = await readTextSample(file);
+      const fileSample = overrideSample ?? await readTextSample(file);
       const res = await fetch(`${QVAC_BASE_URL}/api/suggest`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
@@ -243,7 +262,80 @@ export default function Dashboard() {
     }
   }, [file, qvacOnline]);
 
-  // ── Register ───────────────────────────────────────────────────────────────
+  // ── QVAC: Speech-to-text ────────────────────────────────────────────────
+
+  const toggleRecording = useCallback(async () => {
+    if (recording) {
+      // Stop recording → send to Whisper
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr     = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        setTranscribing(true);
+        try {
+          const blob   = new Blob(audioChunksRef.current, { type: mr.mimeType });
+          const ab     = await blob.arrayBuffer();
+          const b64    = btoa(String.fromCharCode(...new Uint8Array(ab)));
+          const res    = await fetch(`${QVAC_BASE_URL}/api/transcribe`, {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify({ audio: b64 }),
+          });
+          const { text } = await res.json();
+          if (text) setDescription((prev) => prev ? `${prev} ${text}` : text);
+        } catch (e: any) {
+          setError(`Transcription failed: ${e.message}`);
+        } finally {
+          setTranscribing(false);
+        }
+      };
+
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setRecording(true);
+    } catch (e: any) {
+      setError(`Microphone access denied: ${e.message}`);
+    }
+  }, [recording]);
+
+  // ── QVAC: OCR → then AI suggest ─────────────────────────────────────────
+
+  const runOcrAndSuggest = useCallback(async () => {
+    if (!file || !qvacOnline) return;
+    setOcrRunning(true);
+    setError("");
+    try {
+      const b64 = await fileToBase64(file);
+      const res = await fetch(`${QVAC_BASE_URL}/api/ocr`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ image: b64 }),
+      });
+      const { text, error: ocrErr } = await res.json();
+      if (ocrErr) throw new Error(ocrErr);
+      setOcrText(text ?? "");
+      // Feed OCR'd text into AI suggest as the file sample
+      await suggestWithAI(text ?? "");
+    } catch (e: any) {
+      setError(`OCR failed: ${e.message}`);
+    } finally {
+      setOcrRunning(false);
+    }
+  }, [file, qvacOnline, suggestWithAI]);
+
+  // ── Register ──────────────────────────────────────────────────────────────
 
   const handleFileSelect = useCallback(async (f: File) => {
     setFile(f);
@@ -251,6 +343,7 @@ export default function Dashboard() {
     setHashBytes(null);
     setCertificate(null);
     setError("");
+    setOcrText("");
     setStatus("Hashing…");
     try {
       const bytes = await hashFile(f);
@@ -278,10 +371,10 @@ export default function Dashboard() {
       const program  = getProgram();
       const metadata = JSON.stringify({
         analysis_type: analysisType,
-        ...(toolName    ? { tool: toolName }        : {}),
-        ...(toolVersion ? { version: toolVersion }  : {}),
-        ...(description ? { description }           : {}),
-        file_name:     file.name,
+        ...(toolName    ? { tool: toolName }       : {}),
+        ...(toolVersion ? { version: toolVersion } : {}),
+        ...(description ? { description }          : {}),
+        file_name:       file.name,
         file_size_bytes: file.size,
       });
 
@@ -315,7 +408,7 @@ export default function Dashboard() {
     }
   }, [wallet.publicKey, hashBytes, file, analysisType, toolName, toolVersion, description, fileHash, getProgram]);
 
-  // ── Verify ─────────────────────────────────────────────────────────────────
+  // ── Verify ────────────────────────────────────────────────────────────────
 
   const handleVerifyFileSelect = useCallback(async (f: File) => {
     const bytes = await hashFile(f);
@@ -356,7 +449,7 @@ export default function Dashboard() {
     }
   }, [verifyHash, verifyWallet, connection, wallet]);
 
-  // ── Feed ───────────────────────────────────────────────────────────────────
+  // ── Feed ──────────────────────────────────────────────────────────────────
 
   const loadFeed = useCallback(async () => {
     setFeedLoading(true);
@@ -409,10 +502,13 @@ export default function Dashboard() {
 
   useEffect(() => { if (tab === "feed") loadFeed(); }, [tab]); // eslint-disable-line
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // ── Derived ───────────────────────────────────────────────────────────────
 
-  const metaOver = metadataBytes > META_LIMIT;
-  const metaPct  = Math.min(metadataBytes / META_LIMIT, 1);
+  const metaOver  = metadataBytes > META_LIMIT;
+  const metaPct   = Math.min(metadataBytes / META_LIMIT, 1);
+  const fileIsImg = file ? isImageFile(file) : false;
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="app">
@@ -432,7 +528,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── Mobile wallet notice ── */}
+      {/* ── Mobile notice ── */}
       {IS_MOBILE && !wallet.connected && (
         <div className="notice">
           <strong>Mobile:</strong> open this URL inside the <strong>Phantom</strong> or <strong>Solflare</strong> app browser, or connect via the button above.
@@ -454,9 +550,9 @@ export default function Dashboard() {
         {tab === "register" && (
           <div className="pane">
             <h2 className="pane-title">Register a discovery</h2>
-            <p className="pane-sub">Any research output — data files, code, results, documents. The file stays on your device; only its SHA-256 hash is stored on Solana.</p>
+            <p className="pane-sub">Any research output — data files, code, results, documents, images. The file stays on your device; only its SHA-256 hash is stored on Solana.</p>
 
-            {/* Step 1 */}
+            {/* Step 1 — file */}
             <div className="step">
               <div className="step-head">
                 <span className="step-num">1</span>
@@ -473,17 +569,17 @@ export default function Dashboard() {
                   onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])} />
                 {file ? (
                   <div className="dropzone-file">
-                    <span className="file-icon">📄</span>
+                    <span className="file-icon">{fileIsImg ? "🖼️" : "📄"}</span>
                     <div>
                       <div className="file-name">{file.name}</div>
-                      <div className="file-size">{(file.size / 1024).toFixed(1)} KB</div>
+                      <div className="file-size">{(file.size / 1024).toFixed(1)} KB{fileIsImg ? " · image" : ""}</div>
                     </div>
                   </div>
                 ) : (
                   <div className="dropzone-empty">
                     <span className="drop-icon">↑</span>
                     <span>Drop any research file here, or tap to browse</span>
-                    <span className="drop-hint">PDF, CSV, JSON, FASTQ, code, images — anything</span>
+                    <span className="drop-hint">PDF, CSV, JSON, images, code — anything · Images support OCR</span>
                   </div>
                 )}
               </div>
@@ -499,18 +595,40 @@ export default function Dashboard() {
               )}
             </div>
 
-            {/* Step 2 */}
+            {/* Step 2 — metadata */}
             {file && (
               <div className="step">
                 <div className="step-head">
                   <span className="step-num">2</span>
                   <span className="step-label">Describe your research</span>
                   {qvacOnline && (
-                    <button className="btn-ai" disabled={suggesting} onClick={suggestWithAI}>
-                      {suggesting ? <><span className="spin" /> Thinking…</> : "✦ Suggest with AI"}
-                    </button>
+                    <div className="step-actions">
+                      {fileIsImg ? (
+                        /* Image file: OCR → AI suggest */
+                        <button className="btn-ai" disabled={ocrRunning || suggesting} onClick={runOcrAndSuggest}>
+                          {ocrRunning
+                            ? <><span className="spin" /> Reading…</>
+                            : suggesting
+                            ? <><span className="spin" /> Thinking…</>
+                            : "✦ OCR + AI suggest"}
+                        </button>
+                      ) : (
+                        /* Non-image: regular AI suggest */
+                        <button className="btn-ai" disabled={suggesting} onClick={() => suggestWithAI()}>
+                          {suggesting ? <><span className="spin" /> Thinking…</> : "✦ Suggest with AI"}
+                        </button>
+                      )}
+                    </div>
                   )}
                 </div>
+
+                {/* OCR result preview */}
+                {ocrText && (
+                  <div className="ocr-preview">
+                    <span className="ocr-label">OCR extracted</span>
+                    <span className="ocr-snippet">{ocrText.slice(0, 200)}{ocrText.length > 200 ? "…" : ""}</span>
+                  </div>
+                )}
 
                 <div className="fields">
                   <label className="field">
@@ -533,15 +651,48 @@ export default function Dashboard() {
                     </label>
                   </div>
 
+                  {/* Description with mic button */}
                   <label className="field">
                     <span>Description <span className="field-opt">(optional)</span></span>
-                    <input type="text" value={description} placeholder="One sentence about what this output contains" onChange={(e) => setDescription(e.target.value)} />
+                    <div className="desc-row">
+                      <input
+                        type="text"
+                        value={description}
+                        placeholder="One sentence about what this output contains"
+                        onChange={(e) => setDescription(e.target.value)}
+                      />
+                      {qvacOnline && (
+                        <button
+                          className={`mic-btn${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
+                          title={recording ? "Stop recording" : "Record description (Whisper STT)"}
+                          disabled={transcribing}
+                          onClick={toggleRecording}
+                        >
+                          {transcribing
+                            ? <span className="spin spin-sm" />
+                            : recording
+                            ? <MicIcon active />
+                            : <MicIcon />}
+                        </button>
+                      )}
+                    </div>
+                    {recording && (
+                      <div className="mic-hint">
+                        <span className="rec-dot" /> Recording… tap again to stop
+                      </div>
+                    )}
+                    {transcribing && (
+                      <div className="mic-hint">Transcribing with Whisper…</div>
+                    )}
                   </label>
 
                   {/* Live byte counter */}
                   <div className="meta-counter">
                     <div className="meta-bar">
-                      <div className="meta-bar-fill" style={{ width: `${metaPct * 100}%`, background: metaOver ? "#f87171" : metaPct > 0.8 ? "#fbbf24" : "#14f195" }} />
+                      <div className="meta-bar-fill" style={{
+                        width: `${metaPct * 100}%`,
+                        background: metaOver ? "#f87171" : metaPct > 0.8 ? "#fbbf24" : "#14f195"
+                      }} />
                     </div>
                     <span className={`meta-count${metaOver ? " over" : ""}`}>
                       {metadataBytes} / {META_LIMIT} bytes
@@ -551,7 +702,7 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Step 3 */}
+            {/* Step 3 — register */}
             {hashBytes && (
               <div className="step">
                 <div className="step-head">
@@ -602,14 +753,13 @@ export default function Dashboard() {
         {tab === "verify" && (
           <div className="pane">
             <h2 className="pane-title">Verify a discovery</h2>
-            <p className="pane-sub">Check whether a file's hash exists on-chain. You can paste the hash or drop the original file.</p>
+            <p className="pane-sub">Check whether a file's hash exists on-chain. Paste the hash or drop the original file.</p>
 
             <div className="fields">
               <label className="field">
                 <span>Researcher wallet address</span>
                 <input type="text" value={verifyWallet} placeholder="Solana public key" onChange={(e) => setVerifyWallet(e.target.value)} />
               </label>
-
               <label className="field">
                 <span>File hash (SHA-256 hex)</span>
                 <input type="text" className="mono" value={verifyHash} placeholder="64-character hex" onChange={(e) => setVerifyHash(e.target.value)} />
@@ -721,7 +871,18 @@ export default function Dashboard() {
   );
 }
 
-// ── Small helpers ─────────────────────────────────────────────────────────────
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function MicIcon({ active }: { active?: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={active ? "#f87171" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="2" width="6" height="11" rx="3" />
+      <path d="M5 10a7 7 0 0 0 14 0" />
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <line x1="8"  y1="22" x2="16" y2="22" />
+    </svg>
+  );
+}
 
 function CertRow({
   label, value, mono, onCopy, copied
