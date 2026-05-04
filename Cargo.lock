@@ -6053,6 +6053,7 @@ dependencies = [
  "shellexpand",
  "solana-client",
  "solana-sdk",
+ "solana-system-interface 1.0.0",
 ]
 
 [[package]]
