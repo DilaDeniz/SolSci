@@ -750,17 +750,23 @@
   <div class="ticker">
     <div class="ticker-item">SHA-256 hash · <span>local only</span></div>
     <div class="ticker-item">On-chain timestamp · <span>immutable</span></div>
-    <div class="ticker-item">PDA keyed by (wallet, hash) · <span>unforgeable</span></div>
+    <div class="ticker-item">IPFS storage · <span>decentralised</span></div>
+    <div class="ticker-item">Peer endorsements · <span>on-chain proof</span></div>
+    <div class="ticker-item">ORCID identity · <span>no passwords</span></div>
+    <div class="ticker-item">QVAC · <span>6 AI capabilities, no cloud</span></div>
+    <div class="ticker-item">Ownership transfer · <span>on-chain</span></div>
+    <div class="ticker-item">Citation graph · <span>in metadata</span></div>
     <div class="ticker-item">Solana devnet · <span>8cmvWB8SrFvS5fKjsCw4bme9iFVeFCFsbTPKdq9NykbH</span></div>
-    <div class="ticker-item">Apache 2.0 · <span>open source</span></div>
-    <div class="ticker-item">QVAC local AI · <span>no cloud</span></div>
     <!-- duplicate for seamless loop -->
     <div class="ticker-item">SHA-256 hash · <span>local only</span></div>
     <div class="ticker-item">On-chain timestamp · <span>immutable</span></div>
-    <div class="ticker-item">PDA keyed by (wallet, hash) · <span>unforgeable</span></div>
+    <div class="ticker-item">IPFS storage · <span>decentralised</span></div>
+    <div class="ticker-item">Peer endorsements · <span>on-chain proof</span></div>
+    <div class="ticker-item">ORCID identity · <span>no passwords</span></div>
+    <div class="ticker-item">QVAC · <span>6 AI capabilities, no cloud</span></div>
+    <div class="ticker-item">Ownership transfer · <span>on-chain</span></div>
+    <div class="ticker-item">Citation graph · <span>in metadata</span></div>
     <div class="ticker-item">Solana devnet · <span>8cmvWB8SrFvS5fKjsCw4bme9iFVeFCFsbTPKdq9NykbH</span></div>
-    <div class="ticker-item">Apache 2.0 · <span>open source</span></div>
-    <div class="ticker-item">QVAC local AI · <span>no cloud</span></div>
   </div>
 </div>
 
@@ -805,17 +811,46 @@
     <div class="b span-4">
       <div class="b-label">Ownership</div>
       <div class="b-icon">🔑</div>
-      <div class="b-title">Your wallet, your record</div>
-      <div class="b-body">PDA keyed to (wallet, hash). Nobody can register the same file under your identity.</div>
+      <div class="b-title">Transfer &amp; close</div>
+      <div class="b-body">PDA keyed to (researcher, hash) — immutable origin. The <em>owner</em> field is transferable on-chain, so discoveries can be sold or delegated without losing provenance.</div>
     </div>
 
     <div class="b span-4">
       <div class="b-accent-br"></div>
-      <div class="b-label">Local AI</div>
+      <div class="b-label">Local AI · 6 capabilities</div>
       <div class="b-icon">✦</div>
-      <div class="b-title">QVAC metadata<br />assistant</div>
-      <div class="b-body" style="margin-top:0.4rem">Llama 3.2 1B runs on your device. Suggests research type, tool, description — no cloud.</div>
+      <div class="b-title">QVAC — all on-device</div>
+      <div class="b-body" style="margin-top:0.4rem">Llama 3.2 1B · embeddings · Whisper STT · ONNX OCR · multilingual translation · IPFS upload. Zero data leaves your machine.</div>
       <div style="margin-top:0.85rem"><span class="tag tag-purple">Tether QVAC</span></div>
+    </div>
+
+    <div class="b span-4">
+      <div class="b-label">Peer review</div>
+      <div class="b-icon">◈</div>
+      <div class="b-title">On-chain endorsements</div>
+      <div class="b-body">Any wallet can endorse a discovery — one endorsement per (endorser, discovery) pair, enforced by PDA uniqueness. The count is stored atomically on-chain.</div>
+    </div>
+
+    <div class="b span-4">
+      <div class="b-label">Decentralised storage</div>
+      <div class="b-icon">⬡</div>
+      <div class="b-title">IPFS pin from the UI</div>
+      <div class="b-body">One click uploads your file to a local Kubo node (or Pinata). The IPFS gateway URL is stored in metadata so anyone can fetch-and-verify the actual file.</div>
+      <div style="margin-top:0.85rem"><span class="tag tag-green">Content-addressed</span></div>
+    </div>
+
+    <div class="b span-4">
+      <div class="b-label">Identity</div>
+      <div class="b-icon">🪪</div>
+      <div class="b-title">ORCID &amp; email — no passwords</div>
+      <div class="b-body">Store your ORCID iD in metadata. The wallet signature on the registration transaction is the proof. Feed cards auto-resolve researcher names from the public ORCID API.</div>
+    </div>
+
+    <div class="b span-4">
+      <div class="b-label">Knowledge graph</div>
+      <div class="b-icon">↗</div>
+      <div class="b-title">Citation graph</div>
+      <div class="b-body">Register which prior discoveries your work builds on by pasting their certificate PDAs. Citations are stored in metadata and rendered as clickable links in the discovery feed.</div>
     </div>
 
     <!-- code card -->
@@ -825,15 +860,22 @@
 <span class="c"># DiscoveryRecord PDA</span>
 seeds = [<span class="p">"discovery"</span>, researcher.pubkey, file_hash]
 
-researcher    : Pubkey    <span class="c"># your wallet</span>
-file_hash     : [u8; 32]  <span class="c"># SHA-256</span>
-timestamp     : i64       <span class="c"># unix, immutable</span>
-metadata      : String    <span class="c"># ≤512 bytes, your choice</span>
-bump          : u8        <span class="c"># PDA canonical bump</span>
+researcher        : Pubkey    <span class="c"># original registrant — immutable</span>
+owner             : Pubkey    <span class="c"># current owner — transferable</span>
+file_hash         : [u8; 32]  <span class="c"># SHA-256</span>
+timestamp         : i64       <span class="c"># unix, immutable</span>
+metadata          : String    <span class="c"># ≤512 bytes JSON (ORCID, IPFS URL, cites…)</span>
+endorsement_count : u32       <span class="c"># peer endorsements received</span>
+bump              : u8
+
+<span class="c"># EndorsementRecord PDA</span>
+seeds = [<span class="p">"endorsement"</span>, endorser.pubkey, discovery_record.pubkey]
 
 <span class="g">✓ register_discovery</span>   <span class="c"># creates the record</span>
+<span class="g">✓ transfer_discovery</span>   <span class="c"># changes owner (researcher preserved)</span>
+<span class="g">✓ endorse_discovery</span>    <span class="c"># one endorsement per wallet, on-chain</span>
 <span class="p">◈ verify_discovery</span>    <span class="c"># emits event, readable by any CPI caller</span>
-<span class="o">✕ close_discovery</span>     <span class="c"># closes + returns rent to researcher</span>
+<span class="o">✕ close_discovery</span>     <span class="c"># owner closes + reclaims rent</span>
       </div>
     </div>
   </div>
