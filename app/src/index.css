@@ -100,6 +100,12 @@ body {
   text-transform: capitalize;
 }
 
+.pill-gold {
+  background: #fbbf2414;
+  border: 1px solid #fbbf2430;
+  color: #fbbf24;
+}
+
 /* ── Mobile notice ── */
 .notice {
   background: #1a1a28;
@@ -771,6 +777,55 @@ body {
 }
 
 .meta-count.over { color: #f87171; }
+
+/* ── Citation chips ── */
+.cite-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.cite-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: #1a1a28;
+  border: 1px solid #2a2a3e;
+  border-radius: 6px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.cite-chip button {
+  background: none;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  padding: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.cite-chip button:hover { color: #f87171; }
+
+/* ── Feed citations ── */
+.feed-cites {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+}
+
+.feed-cites-label {
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.67rem;
+}
 
 /* ── Transfer section ── */
 .transfer-section {

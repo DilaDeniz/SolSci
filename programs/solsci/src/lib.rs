@@ -22,12 +22,13 @@ pub mod solsci {
         require!(metadata.len() <= MAX_METADATA_LEN, SolSciError::MetadataTooLong);
 
         let record = &mut ctx.accounts.discovery_record;
-        record.researcher = ctx.accounts.researcher.key();
-        record.owner      = ctx.accounts.researcher.key();
-        record.file_hash  = file_hash;
-        record.timestamp  = Clock::get()?.unix_timestamp;
-        record.bump       = ctx.bumps.discovery_record;
-        record.metadata   = metadata;
+        record.researcher      = ctx.accounts.researcher.key();
+        record.owner           = ctx.accounts.researcher.key();
+        record.file_hash       = file_hash;
+        record.timestamp       = Clock::get()?.unix_timestamp;
+        record.bump            = ctx.bumps.discovery_record;
+        record.metadata        = metadata;
+        record.endorsement_count = 0;
 
         emit!(DiscoveryRegistered {
             researcher:     record.researcher,
@@ -82,6 +83,44 @@ pub mod solsci {
             timestamp:      record.timestamp,
             metadata:       record.metadata.clone(),
             certificate_id: ctx.accounts.discovery_record.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Endorse a discovery as a peer reviewer.
+    ///
+    /// Creates a unique `EndorsementRecord` PDA keyed by `(endorser, discovery_record)`.
+    /// One endorser can endorse each discovery exactly once. The discovery's
+    /// `endorsement_count` is incremented atomically.
+    pub fn endorse_discovery(
+        ctx: Context<EndorseDiscovery>,
+        _file_hash: [u8; 32],
+    ) -> Result<()> {
+        let endorser_key      = ctx.accounts.endorser.key();
+        let discovery_key     = ctx.accounts.discovery_record.key();
+        let researcher        = ctx.accounts.discovery_record.researcher;
+
+        require!(
+            endorser_key != ctx.accounts.discovery_record.owner,
+            SolSciError::CannotEndorseOwn,
+        );
+
+        let endorsement = &mut ctx.accounts.endorsement_record;
+        endorsement.endorser          = endorser_key;
+        endorsement.discovery_record  = discovery_key;
+        endorsement.timestamp         = Clock::get()?.unix_timestamp;
+        endorsement.bump              = ctx.bumps.endorsement_record;
+
+        ctx.accounts.discovery_record.endorsement_count = ctx
+            .accounts.discovery_record.endorsement_count
+            .saturating_add(1);
+
+        emit!(DiscoveryEndorsed {
+            certificate_id: discovery_key,
+            endorser:       endorser_key,
+            researcher,
+            timestamp:      endorsement.timestamp,
         });
 
         Ok(())
@@ -155,6 +194,36 @@ pub struct VerifyDiscovery<'info> {
 
 #[derive(Accounts)]
 #[instruction(file_hash: [u8; 32])]
+pub struct EndorseDiscovery<'info> {
+    /// Peer reviewer who is endorsing the discovery.
+    #[account(mut)]
+    pub endorser: Signer<'info>,
+
+    /// Original researcher — needed to re-derive the discovery PDA seeds.
+    pub researcher: SystemAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"discovery", researcher.key().as_ref(), file_hash.as_ref()],
+        bump  = discovery_record.bump,
+    )]
+    pub discovery_record: Account<'info, DiscoveryRecord>,
+
+    /// One endorsement per (endorser, discovery) pair — enforced by PDA uniqueness.
+    #[account(
+        init,
+        payer  = endorser,
+        space  = 8 + EndorsementRecord::INIT_SPACE,
+        seeds  = [b"endorsement", endorser.key().as_ref(), discovery_record.key().as_ref()],
+        bump,
+    )]
+    pub endorsement_record: Account<'info, EndorsementRecord>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(file_hash: [u8; 32])]
 pub struct CloseDiscovery<'info> {
     /// Current owner receives the reclaimed rent.
     #[account(mut)]
@@ -179,14 +248,25 @@ pub struct CloseDiscovery<'info> {
 #[derive(InitSpace)]
 pub struct DiscoveryRecord {
     /// Original registrant — immutable, part of the PDA seeds.
-    pub researcher: Pubkey,
+    pub researcher:        Pubkey,
     /// Current owner — may differ from researcher after a transfer.
-    pub owner:      Pubkey,
-    pub file_hash:  [u8; 32],
-    pub timestamp:  i64,
+    pub owner:             Pubkey,
+    pub file_hash:         [u8; 32],
+    pub timestamp:         i64,
     #[max_len(512)]
-    pub metadata:   String,
-    pub bump:       u8,
+    pub metadata:          String,
+    pub bump:              u8,
+    /// Number of peer endorsements received.
+    pub endorsement_count: u32,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct EndorsementRecord {
+    pub endorser:         Pubkey,
+    pub discovery_record: Pubkey,
+    pub timestamp:        i64,
+    pub bump:             u8,
 }
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -219,6 +299,14 @@ pub struct DiscoveryVerified {
     pub certificate_id: Pubkey,
 }
 
+#[event]
+pub struct DiscoveryEndorsed {
+    pub certificate_id: Pubkey,
+    pub endorser:       Pubkey,
+    pub researcher:     Pubkey,
+    pub timestamp:      i64,
+}
+
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 #[error_code]
@@ -229,4 +317,6 @@ pub enum SolSciError {
     MetadataEmpty,
     #[msg("Only the current owner can perform this action")]
     NotOwner,
+    #[msg("You cannot endorse your own discovery")]
+    CannotEndorseOwn,
 }

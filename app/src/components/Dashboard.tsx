@@ -62,6 +62,8 @@ interface VerifyResult {
   owner?: string;
   timestamp?: number;
   metadata?: string;
+  endorsementCount?: number;
+  fileHashHex?: string;
 }
 
 interface FeedEntry {
@@ -71,6 +73,7 @@ interface FeedEntry {
   fileHash: string;
   timestamp: number;
   metadata: string;
+  endorsementCount: number;
   _score?: number;
 }
 
@@ -176,6 +179,10 @@ export default function Dashboard() {
   // ── Translate state ───────────────────────────────────────────────────────
   const [translating, setTranslating] = useState(false);
 
+  // ── IPFS state ────────────────────────────────────────────────────────────
+  const [ipfsUploading, setIpfsUploading] = useState(false);
+  const [ipfsCid,       setIpfsCid]       = useState("");
+
   // ── Verify state ──────────────────────────────────────────────────────────
   const [verifyHash,    setVerifyHash]    = useState("");
   const [verifyWallet,  setVerifyWallet]  = useState("");
@@ -187,7 +194,14 @@ export default function Dashboard() {
   const [transferring,  setTransferring]  = useState(false);
   const [transferError, setTransferError] = useState("");
   const [transferDone,  setTransferDone]  = useState(false);
+  const [endorsing,     setEndorsing]     = useState(false);
+  const [endorseError,  setEndorseError]  = useState("");
+  const [endorseDone,   setEndorseDone]   = useState(false);
   const verifyFileRef = useRef<HTMLInputElement>(null);
+
+  // ── Citation state ────────────────────────────────────────────────────────
+  const [citeInput,  setCiteInput]  = useState("");
+  const [citedPdas,  setCitedPdas]  = useState<string[]>([]);
 
   // ── Feed state ────────────────────────────────────────────────────────────
   const [feed,        setFeed]        = useState<FeedEntry[]>([]);
@@ -204,10 +218,12 @@ export default function Dashboard() {
       ...(toolName    ? { tool: toolName }       : {}),
       ...(toolVersion ? { version: toolVersion } : {}),
       ...(description ? { description }          : {}),
+      ...(publicUrl   ? { url: publicUrl }       : {}),
+      ...(citedPdas.length > 0 ? { cites: citedPdas } : {}),
       ...(file ? { file_name: file.name, file_size_bytes: file.size } : {}),
     };
     return byteLen(JSON.stringify(obj));
-  }, [analysisType, toolName, toolVersion, description, file]);
+  }, [analysisType, toolName, toolVersion, description, publicUrl, citedPdas, file]);
 
   // ── Core helpers ──────────────────────────────────────────────────────────
 
@@ -368,6 +384,30 @@ export default function Dashboard() {
     }
   }, [description, qvacOnline]);
 
+  // ── QVAC: IPFS upload ────────────────────────────────────────────────────
+
+  const uploadFileToIpfs = useCallback(async () => {
+    if (!file || !qvacOnline) return;
+    setIpfsUploading(true);
+    setError("");
+    try {
+      const b64 = await fileToBase64(file);
+      const res = await fetch(`${QVAC_BASE_URL}/api/ipfs`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ file: b64, fileName: file.name }),
+      });
+      const { cid, url, error: ipfsErr } = await res.json();
+      if (ipfsErr) throw new Error(ipfsErr);
+      setIpfsCid(cid);
+      setPublicUrl(url);
+    } catch (e: any) {
+      setError(`IPFS upload failed: ${e.message}`);
+    } finally {
+      setIpfsUploading(false);
+    }
+  }, [file, qvacOnline]);
+
   // ── Register ──────────────────────────────────────────────────────────────
 
   const handleFileSelect = useCallback(async (f: File) => {
@@ -378,6 +418,8 @@ export default function Dashboard() {
     setError("");
     setOcrText("");
     setPublicUrl("");
+    setIpfsCid("");
+    setCitedPdas([]);
     setStatus("Hashing…");
     try {
       const bytes = await hashFile(f);
@@ -405,10 +447,11 @@ export default function Dashboard() {
       const program  = getProgram();
       const metadata = JSON.stringify({
         analysis_type: analysisType,
-        ...(toolName    ? { tool: toolName }       : {}),
-        ...(toolVersion ? { version: toolVersion } : {}),
-        ...(description ? { description }          : {}),
-        ...(publicUrl   ? { url: publicUrl }       : {}),
+        ...(toolName     ? { tool: toolName }         : {}),
+        ...(toolVersion  ? { version: toolVersion }   : {}),
+        ...(description  ? { description }            : {}),
+        ...(publicUrl    ? { url: publicUrl }         : {}),
+        ...(citedPdas.length > 0 ? { cites: citedPdas } : {}),
         file_name:       file.name,
         file_size_bytes: file.size,
       });
@@ -475,7 +518,16 @@ export default function Dashboard() {
         PROGRAM_ID
       );
       const record = await (program.account as any).discoveryRecord.fetch(pda);
-      setVerifyResult({ found: true, pda: pda.toBase58(), researcher: record.researcher.toBase58(), owner: record.owner?.toBase58() ?? record.researcher.toBase58(), timestamp: record.timestamp.toNumber(), metadata: record.metadata });
+      setVerifyResult({
+        found: true,
+        pda: pda.toBase58(),
+        researcher: record.researcher.toBase58(),
+        owner: record.owner?.toBase58() ?? record.researcher.toBase58(),
+        timestamp: record.timestamp.toNumber(),
+        metadata: record.metadata,
+        endorsementCount: record.endorsementCount ?? 0,
+        fileHashHex: hashHex,
+      });
       setTransferTo("");
       setTransferError("");
       setTransferDone(false);
@@ -547,6 +599,44 @@ export default function Dashboard() {
     }
   }, [wallet.publicKey, verifyResult, verifyHash, transferTo, getProgram]);
 
+  // ── Endorse ───────────────────────────────────────────────────────────────
+
+  const endorseDiscovery = useCallback(async () => {
+    if (!wallet.publicKey || !verifyResult?.researcher || !verifyResult.fileHashHex) return;
+    setEndorsing(true);
+    setEndorseError("");
+    try {
+      const program       = getProgram();
+      const hashHex       = verifyResult.fileHashHex;
+      const researcherKey = new PublicKey(verifyResult.researcher);
+      const [pda]         = PublicKey.findProgramAddressSync(
+        [Buffer.from("discovery"), researcherKey.toBuffer(), Buffer.from(hashHex, "hex")],
+        PROGRAM_ID
+      );
+      const [endorsementPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("endorsement"), wallet.publicKey.toBuffer(), pda.toBuffer()],
+        PROGRAM_ID
+      );
+      await (program.methods as any)
+        .endorseDiscovery(Array.from(Buffer.from(hashHex, "hex")))
+        .accounts({
+          endorser:         wallet.publicKey,
+          researcher:       researcherKey,
+          discoveryRecord:  pda,
+          endorsementRecord: endorsementPda,
+          systemProgram:    SystemProgram.programId,
+        })
+        .rpc({ commitment: "confirmed" });
+
+      setEndorseDone(true);
+      setVerifyResult((prev) => prev ? { ...prev, endorsementCount: (prev.endorsementCount ?? 0) + 1 } : prev);
+    } catch (e: any) {
+      setEndorseError(e?.message ?? "Endorsement failed.");
+    } finally {
+      setEndorsing(false);
+    }
+  }, [wallet.publicKey, verifyResult, getProgram]);
+
   // ── Feed ──────────────────────────────────────────────────────────────────
 
   const loadFeed = useCallback(async () => {
@@ -564,12 +654,13 @@ export default function Dashboard() {
       const accounts = await (program.account as any).discoveryRecord.all();
       const entries: FeedEntry[] = accounts
         .map((a: any) => ({
-          pda:        a.publicKey.toBase58(),
-          researcher: a.account.researcher.toBase58(),
-          owner:      (a.account.owner ?? a.account.researcher).toBase58(),
-          fileHash:   Buffer.from(a.account.fileHash).toString("hex"),
-          timestamp:  a.account.timestamp.toNumber(),
-          metadata:   a.account.metadata,
+          pda:              a.publicKey.toBase58(),
+          researcher:       a.account.researcher.toBase58(),
+          owner:            (a.account.owner ?? a.account.researcher).toBase58(),
+          fileHash:         Buffer.from(a.account.fileHash).toString("hex"),
+          timestamp:        a.account.timestamp.toNumber(),
+          metadata:         a.account.metadata,
+          endorsementCount: a.account.endorsementCount ?? 0,
         }))
         .sort((a: FeedEntry, b: FeedEntry) => b.timestamp - a.timestamp)
         .slice(0, 50);
@@ -799,12 +890,76 @@ export default function Dashboard() {
 
                   <label className="field">
                     <span>Public file URL <span className="field-opt">(optional — lets others auto-verify)</span></span>
-                    <input
-                      type="url"
-                      value={publicUrl}
-                      placeholder="https://github.com/you/repo/blob/main/results.csv"
-                      onChange={(e) => setPublicUrl(e.target.value)}
-                    />
+                    <div className="desc-row">
+                      <input
+                        type="url"
+                        value={publicUrl}
+                        placeholder="https://ipfs.io/ipfs/… or any direct link"
+                        onChange={(e) => { setPublicUrl(e.target.value); setIpfsCid(""); }}
+                      />
+                      {qvacOnline && (
+                        <button
+                          className="mic-btn"
+                          title="Pin file to IPFS and fill URL automatically"
+                          disabled={ipfsUploading}
+                          onClick={uploadFileToIpfs}
+                        >
+                          {ipfsUploading ? <span className="spin spin-sm" /> : <IpfsIcon />}
+                        </button>
+                      )}
+                    </div>
+                    {ipfsCid && (
+                      <div className="mic-hint">
+                        Pinned ✓ CID: <span className="mono">{ipfsCid.slice(0, 20)}…</span>
+                      </div>
+                    )}
+                  </label>
+
+                  {/* Citation input */}
+                  <label className="field">
+                    <span>Cites <span className="field-opt">(optional — paste certificate PDAs this work builds on)</span></span>
+                    <div className="desc-row">
+                      <input
+                        type="text"
+                        className="mono"
+                        value={citeInput}
+                        placeholder="Certificate PDA address"
+                        onChange={(e) => setCiteInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && citeInput.trim()) {
+                            try {
+                              new PublicKey(citeInput.trim());
+                              if (!citedPdas.includes(citeInput.trim()))
+                                setCitedPdas((p) => [...p, citeInput.trim()]);
+                              setCiteInput("");
+                            } catch { /* invalid key */ }
+                          }
+                        }}
+                      />
+                      <button
+                        className="mic-btn"
+                        title="Add citation"
+                        disabled={!citeInput.trim()}
+                        onClick={() => {
+                          try {
+                            new PublicKey(citeInput.trim());
+                            if (!citedPdas.includes(citeInput.trim()))
+                              setCitedPdas((p) => [...p, citeInput.trim()]);
+                            setCiteInput("");
+                          } catch { /* invalid */ }
+                        }}
+                      >+</button>
+                    </div>
+                    {citedPdas.length > 0 && (
+                      <div className="cite-list">
+                        {citedPdas.map((pda) => (
+                          <div key={pda} className="cite-chip">
+                            <span className="mono">{truncate(pda, 6)}</span>
+                            <button onClick={() => setCitedPdas((p) => p.filter((x) => x !== pda))}>×</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </label>
 
                   {/* Live byte counter */}
@@ -919,6 +1074,7 @@ export default function Dashboard() {
                         onCopy={() => copy(verifyResult.owner!, "v-own")} copied={copiedKey === "v-own"} />
                     )}
                     <CertRow label="Registered" value={new Date(verifyResult.timestamp! * 1000).toUTCString()} />
+                    <CertRow label="Endorsements" value={String(verifyResult.endorsementCount ?? 0)} />
                     <CertRow label="Metadata" value={renderMeta(verifyResult.metadata!)} />
                   </div>
                   {/* Auto-verify from URL if researcher included one */}
@@ -949,6 +1105,24 @@ export default function Dashboard() {
                       </button>
                     </div>
                   )}
+                  {/* Endorse — shown to any connected wallet that is NOT the owner */}
+                  {wallet.connected && wallet.publicKey?.toBase58() !== (verifyResult.owner ?? verifyResult.researcher) && (
+                    <div className="transfer-section">
+                      <div className="transfer-header">Peer endorsement</div>
+                      {endorseDone ? (
+                        <p className="msg-info">Endorsement recorded on-chain. Total: {verifyResult.endorsementCount}</p>
+                      ) : (
+                        <>
+                          <button className="btn-primary" disabled={endorsing} onClick={endorseDiscovery}>
+                            {endorsing ? <><span className="spin" />Endorsing…</> : "✦ Endorse this discovery →"}
+                          </button>
+                          {endorseError && <p className="msg-error">{endorseError}</p>}
+                          <p className="transfer-hint">One endorsement per wallet. Stored immutably on-chain.</p>
+                        </>
+                      )}
+                    </div>
+                  )}
+
                   {/* Transfer ownership — only shown to current owner */}
                   {wallet.connected && wallet.publicKey?.toBase58() === (verifyResult.owner ?? verifyResult.researcher) && (
                     <div className="transfer-section">
@@ -1030,6 +1204,9 @@ export default function Dashboard() {
                     <div className="feed-card-top">
                       {type && <span className="pill pill-purple">{typeLabel(type)}</span>}
                       <span className="feed-date">{new Date(entry.timestamp * 1000).toLocaleDateString()}</span>
+                      {entry.endorsementCount > 0 && (
+                        <span className="pill pill-gold" title="Peer endorsements">✦ {entry.endorsementCount}</span>
+                      )}
                       {entry._score !== undefined && (
                         <span className="pill pill-green">{(entry._score * 100).toFixed(0)}% match</span>
                       )}
@@ -1040,6 +1217,22 @@ export default function Dashboard() {
                       <FeedMeta label="Hash" value={truncate(entry.fileHash, 10)} mono />
                       {(tool || ver) && <FeedMeta label="Tool" value={[tool, ver].filter(Boolean).join(" ")} />}
                     </div>
+                    {(() => {
+                      try {
+                        const cites: string[] = JSON.parse(entry.metadata)?.cites ?? [];
+                        if (cites.length === 0) return null;
+                        return (
+                          <div className="feed-cites">
+                            <span className="feed-cites-label">Cites</span>
+                            {cites.map((c) => (
+                              <a key={c} className="feed-link mono" href={`https://explorer.solana.com/address/${c}?cluster=devnet`} target="_blank" rel="noreferrer">
+                                {truncate(c, 6)} ↗
+                              </a>
+                            ))}
+                          </div>
+                        );
+                      } catch { return null; }
+                    })()}
                     <div className="feed-card-footer">
                       <a className="feed-link" href={`https://explorer.solana.com/address/${entry.pda}?cluster=devnet`} target="_blank" rel="noreferrer">
                         View certificate ↗
@@ -1070,6 +1263,16 @@ function MicIcon({ active }: { active?: boolean }) {
       <path d="M5 10a7 7 0 0 0 14 0" />
       <line x1="12" y1="17" x2="12" y2="22" />
       <line x1="8"  y1="22" x2="16" y2="22" />
+    </svg>
+  );
+}
+
+function IpfsIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+      <path d="M2 17l10 5 10-5" />
+      <path d="M2 12l10 5 10-5" />
     </svg>
   );
 }
