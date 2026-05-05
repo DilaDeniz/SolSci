@@ -1,162 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { AnchorProvider, Program, Idl } from "@coral-xyz/anchor";
-import idl from "../idl/solsci.json";
-
-const PROGRAM_ID    = new PublicKey((idl as any).address);
-const QVAC_BASE_URL = "http://localhost:3001";
-const META_LIMIT    = 512;
-const IS_MOBILE     = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent);
-
-const ANALYSIS_TYPES = [
-  // Life sciences
-  "whole_genome_sequencing",
-  "rna_sequencing",
-  "single_cell_sequencing",
-  "proteomics",
-  "metabolomics",
-  "metagenomics",
-  "epigenomics",
-  "chip_seq",
-  "neuroscience",
-  "ecology",
-  "clinical_trial",
-  // Physical sciences
-  "spectroscopy",
-  "crystallography",
-  "particle_physics",
-  "astrophysics",
-  "atmospheric_science",
-  "ocean_science",
-  "quantum_experiment",
-  // Computational
-  "machine_learning",
-  "benchmark",
-  "simulation",
-  "dataset",
-  // Other
-  "chemistry",
-  "materials_science",
-  "social_science",
-  "economics",
-  "experiment",
-  "other",
-];
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface Certificate {
-  pda: string;
-  txSig: string;
-  fileHash: string;
-  timestamp: number;
-  metadata: string;
-}
-
-interface VerifyResult {
-  found: boolean;
-  pda?: string;
-  researcher?: string;
-  owner?: string;
-  timestamp?: number;
-  metadata?: string;
-  endorsementCount?: number;
-  fileHashHex?: string;
-}
-
-interface FeedEntry {
-  pda: string;
-  researcher: string;
-  owner: string;
-  fileHash: string;
-  timestamp: number;
-  metadata: string;
-  endorsementCount: number;
-  _score?: number;
-}
-
-type Tab = "register" | "verify" | "feed";
-
-// ── ORCID public API ─────────────────────────────────────────────────────────
-
-const orcidCache = new Map<string, string>();
-
-async function resolveOrcid(orcidId: string): Promise<string> {
-  if (orcidCache.has(orcidId)) return orcidCache.get(orcidId)!;
-  try {
-    const res  = await fetch(`https://pub.orcid.org/v3.0/${orcidId}/person`, {
-      headers: { Accept: "application/json" },
-      signal:  AbortSignal.timeout(4000),
-    });
-    if (!res.ok) return "";
-    const data = await res.json();
-    const given  = data?.name?.["given-names"]?.value ?? "";
-    const family = data?.name?.["family-name"]?.value ?? "";
-    const name   = [given, family].filter(Boolean).join(" ");
-    orcidCache.set(orcidId, name);
-    return name;
-  } catch {
-    return "";
-  }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function truncate(s: string, n = 8) {
-  return s.length <= n * 2 + 3 ? s : `${s.slice(0, n)}…${s.slice(-n)}`;
-}
-
-function typeLabel(t: string) {
-  return t.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-async function readTextSample(file: File, bytes = 4096): Promise<string> {
-  const slice = file.slice(0, bytes);
-  const buf   = await slice.arrayBuffer();
-  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
-  catch { return ""; }
-}
-
-async function fileToBase64(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-
-function byteLen(s: string) {
-  return new TextEncoder().encode(s).length;
-}
-
-function readonlyWallet(pk: PublicKey) {
-  return {
-    publicKey:           pk,
-    signTransaction:     async (t: any) => t,
-    signAllTransactions: async (ts: any) => ts,
-  };
-}
-
-function isImageFile(file: File) {
-  return file.type.startsWith("image/");
-}
-
-// ── Copy hook ─────────────────────────────────────────────────────────────────
-
-function useCopy() {
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const copy = useCallback((text: string, key: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 1500);
-    });
-  }, []);
-  return { copy, copiedKey };
-}
-
-// ── Component ─────────────────────────────────────────────────────────────────
+import { PublicKey } from "@solana/web3.js";
+import { IS_MOBILE, META_LIMIT, ANALYSIS_TYPES, QVAC_BASE_URL } from "../lib/constants";
+import type { Tab } from "../lib/constants";
+import { metaField, truncate, typeLabel } from "../lib/utils";
+import {
+  CertRow, FeedMeta, IpfsIcon, MicIcon, OrcidInline,
+  TranslateIcon, renderMeta, useCopy,
+} from "./ui";
+import { useRegister } from "../hooks/useRegister";
+import { useVerify }   from "../hooks/useVerify";
+import { useFeed }     from "../hooks/useFeed";
 
 export default function Dashboard() {
   const { connection } = useConnection();
@@ -164,7 +19,6 @@ export default function Dashboard() {
   const [tab, setTab]  = useState<Tab>("register");
   const { copy, copiedKey } = useCopy();
 
-  // ── QVAC health ───────────────────────────────────────────────────────────
   const [qvacOnline, setQvacOnline] = useState(false);
   useEffect(() => {
     fetch(`${QVAC_BASE_URL}/api/health`, { signal: AbortSignal.timeout(600) })
@@ -172,574 +26,16 @@ export default function Dashboard() {
       .catch(() => setQvacOnline(false));
   }, []);
 
-  // ── Register state ────────────────────────────────────────────────────────
-  const [file, setFile]               = useState<File | null>(null);
-  const [fileHash, setFileHash]       = useState("");
-  const [hashBytes, setHashBytes]     = useState<Uint8Array | null>(null);
-  const [analysisType, setAnalysisType] = useState("experiment");
-  const [toolName, setToolName]       = useState("");
-  const [toolVersion, setToolVersion] = useState("");
-  const [description, setDescription] = useState("");
-  const [publicUrl, setPublicUrl]     = useState("");
-  const [orcidId, setOrcidId]         = useState("");
-  const [authorEmail, setAuthorEmail] = useState("");
-  const [status, setStatus]           = useState("");
-  const [error, setError]             = useState("");
-  const [certificate, setCertificate] = useState<Certificate | null>(null);
-  const [registering, setRegistering] = useState(false);
-  const [dragging, setDragging]       = useState(false);
-  const [suggesting, setSuggesting]   = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const reg    = useRegister(connection, wallet, qvacOnline);
+  const ver    = useVerify(connection, wallet);
+  const feed   = useFeed(connection, wallet, qvacOnline);
 
-  // ── STT state ────────────────────────────────────────────────────────────
-  const [recording, setRecording]     = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef   = useRef<BlobPart[]>([]);
-
-  // ── OCR state ────────────────────────────────────────────────────────────
-  const [ocrRunning, setOcrRunning]   = useState(false);
-  const [ocrText, setOcrText]         = useState("");
-
-  // ── Translate state ───────────────────────────────────────────────────────
-  const [translating, setTranslating] = useState(false);
-
-  // ── IPFS state ────────────────────────────────────────────────────────────
-  const [ipfsUploading, setIpfsUploading] = useState(false);
-  const [ipfsCid,       setIpfsCid]       = useState("");
-
-  // ── Verify state ──────────────────────────────────────────────────────────
-  const [verifyHash,    setVerifyHash]    = useState("");
-  const [verifyWallet,  setVerifyWallet]  = useState("");
-  const [verifyResult,  setVerifyResult]  = useState<VerifyResult | null>(null);
-  const [verifyError,   setVerifyError]   = useState("");
-  const [verifying,     setVerifying]     = useState(false);
-  const [fetchVerifying, setFetchVerifying] = useState(false);
-  const [transferTo,    setTransferTo]    = useState("");
-  const [transferring,  setTransferring]  = useState(false);
-  const [transferError, setTransferError] = useState("");
-  const [transferDone,  setTransferDone]  = useState(false);
-  const [endorsing,     setEndorsing]     = useState(false);
-  const [endorseError,  setEndorseError]  = useState("");
-  const [endorseDone,   setEndorseDone]   = useState(false);
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
-  // ── Citation state ────────────────────────────────────────────────────────
-  const [citeInput,  setCiteInput]  = useState("");
-  const [citedPdas,  setCitedPdas]  = useState<string[]>([]);
+  useEffect(() => { if (tab === "feed") feed.loadFeed(); }, [tab]); // eslint-disable-line
 
-  // ── ORCID resolution ──────────────────────────────────────────────────────
-  const [orcidName,  setOrcidName]  = useState("");
-
-  // ── Feed state ────────────────────────────────────────────────────────────
-  const [feed,        setFeed]        = useState<FeedEntry[]>([]);
-  const [feedRaw,     setFeedRaw]     = useState<FeedEntry[]>([]);
-  const [feedLoading, setFeedLoading] = useState(false);
-  const [feedError,   setFeedError]   = useState("");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searching,   setSearching]   = useState(false);
-
-  // ── Live metadata byte count ──────────────────────────────────────────────
-  const metadataBytes = useMemo(() => {
-    const obj = {
-      analysis_type: analysisType,
-      ...(toolName     ? { tool: toolName }         : {}),
-      ...(toolVersion  ? { version: toolVersion }   : {}),
-      ...(description  ? { description }            : {}),
-      ...(publicUrl    ? { url: publicUrl }         : {}),
-      ...(orcidId      ? { orcid: orcidId }         : {}),
-      ...(authorEmail  ? { email: authorEmail }     : {}),
-      ...(citedPdas.length > 0 ? { cites: citedPdas } : {}),
-      ...(file ? { file_name: file.name, file_size_bytes: file.size } : {}),
-    };
-    return byteLen(JSON.stringify(obj));
-  }, [analysisType, toolName, toolVersion, description, publicUrl, orcidId, authorEmail, citedPdas, file]);
-
-  // ── Core helpers ──────────────────────────────────────────────────────────
-
-  async function hashFile(f: File): Promise<Uint8Array> {
-    const buf = await f.arrayBuffer();
-    return new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
-  }
-
-  function bytesToHex(b: Uint8Array) {
-    return Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
-  }
-
-  const getProgram = useCallback(() => {
-    const provider = new AnchorProvider(connection, wallet as any, { commitment: "confirmed" });
-    return new Program(idl as Idl, provider);
-  }, [connection, wallet]);
-
-  function metaField(metaStr: string, key: string): string {
-    try { return JSON.parse(metaStr)[key] ?? ""; }
-    catch { return ""; }
-  }
-
-  function renderMeta(metaStr: string) {
-    try {
-      const obj = JSON.parse(metaStr);
-      return (
-        <dl className="meta-dl">
-          {Object.entries(obj).filter(([, v]) => v).map(([k, v]) => (
-            <div key={k} className="meta-row">
-              <dt>{k.replace(/_/g, " ")}</dt>
-              <dd>{String(v)}</dd>
-            </div>
-          ))}
-        </dl>
-      );
-    } catch {
-      return <span>{metaStr}</span>;
-    }
-  }
-
-  // ── QVAC: AI metadata suggest ────────────────────────────────────────────
-
-  const suggestWithAI = useCallback(async (overrideSample?: string) => {
-    if (!file || !qvacOnline) return;
-    setSuggesting(true);
-    setError("");
-    try {
-      const fileSample = overrideSample ?? await readTextSample(file);
-      const res = await fetch(`${QVAC_BASE_URL}/api/suggest`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ fileName: file.name, fileSample }),
-      });
-      const s = await res.json();
-      if (s.analysis_type) setAnalysisType(s.analysis_type);
-      if (s.tool)          setToolName(s.tool);
-      if (s.version)       setToolVersion(s.version);
-      if (s.description)   setDescription(s.description);
-    } catch (e: any) {
-      setError(`AI suggest failed: ${e.message}`);
-    } finally {
-      setSuggesting(false);
-    }
-  }, [file, qvacOnline]);
-
-  // ── QVAC: Speech-to-text ────────────────────────────────────────────────
-
-  const toggleRecording = useCallback(async () => {
-    if (recording) {
-      // Stop recording → send to Whisper
-      mediaRecorderRef.current?.stop();
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr     = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-
-      mr.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
-      };
-
-      mr.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        setRecording(false);
-        setTranscribing(true);
-        try {
-          const blob   = new Blob(audioChunksRef.current, { type: mr.mimeType });
-          const ab     = await blob.arrayBuffer();
-          const b64    = btoa(String.fromCharCode(...new Uint8Array(ab)));
-          const res    = await fetch(`${QVAC_BASE_URL}/api/transcribe`, {
-            method:  "POST",
-            headers: { "Content-Type": "application/json" },
-            body:    JSON.stringify({ audio: b64 }),
-          });
-          const { text } = await res.json();
-          if (text) setDescription((prev) => prev ? `${prev} ${text}` : text);
-        } catch (e: any) {
-          setError(`Transcription failed: ${e.message}`);
-        } finally {
-          setTranscribing(false);
-        }
-      };
-
-      mr.start();
-      mediaRecorderRef.current = mr;
-      setRecording(true);
-    } catch (e: any) {
-      setError(`Microphone access denied: ${e.message}`);
-    }
-  }, [recording]);
-
-  // ── QVAC: OCR → then AI suggest ─────────────────────────────────────────
-
-  const runOcrAndSuggest = useCallback(async () => {
-    if (!file || !qvacOnline) return;
-    setOcrRunning(true);
-    setError("");
-    try {
-      const b64 = await fileToBase64(file);
-      const res = await fetch(`${QVAC_BASE_URL}/api/ocr`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ image: b64 }),
-      });
-      const { text, error: ocrErr } = await res.json();
-      if (ocrErr) throw new Error(ocrErr);
-      setOcrText(text ?? "");
-      // Feed OCR'd text into AI suggest as the file sample
-      await suggestWithAI(text ?? "");
-    } catch (e: any) {
-      setError(`OCR failed: ${e.message}`);
-    } finally {
-      setOcrRunning(false);
-    }
-  }, [file, qvacOnline, suggestWithAI]);
-
-  // ── QVAC: Translation ────────────────────────────────────────────────────
-
-  const translateDescription = useCallback(async () => {
-    if (!description.trim() || !qvacOnline) return;
-    setTranslating(true);
-    setError("");
-    try {
-      const res = await fetch(`${QVAC_BASE_URL}/api/translate`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ text: description }),
-      });
-      const { text, error: tErr } = await res.json();
-      if (tErr) throw new Error(tErr);
-      if (text) setDescription(text);
-    } catch (e: any) {
-      setError(`Translation failed: ${e.message}`);
-    } finally {
-      setTranslating(false);
-    }
-  }, [description, qvacOnline]);
-
-  // ── QVAC: IPFS upload ────────────────────────────────────────────────────
-
-  const uploadFileToIpfs = useCallback(async () => {
-    if (!file || !qvacOnline) return;
-    setIpfsUploading(true);
-    setError("");
-    try {
-      const b64 = await fileToBase64(file);
-      const res = await fetch(`${QVAC_BASE_URL}/api/ipfs`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ file: b64, fileName: file.name }),
-      });
-      const { cid, url, error: ipfsErr } = await res.json();
-      if (ipfsErr) throw new Error(ipfsErr);
-      setIpfsCid(cid);
-      setPublicUrl(url);
-    } catch (e: any) {
-      setError(`IPFS upload failed: ${e.message}`);
-    } finally {
-      setIpfsUploading(false);
-    }
-  }, [file, qvacOnline]);
-
-  // ── Register ──────────────────────────────────────────────────────────────
-
-  const handleFileSelect = useCallback(async (f: File) => {
-    setFile(f);
-    setFileHash("");
-    setHashBytes(null);
-    setCertificate(null);
-    setError("");
-    setOcrText("");
-    setPublicUrl("");
-    setIpfsCid("");
-    setCitedPdas([]);
-    setStatus("Hashing…");
-    try {
-      const bytes = await hashFile(f);
-      setHashBytes(bytes);
-      setFileHash(bytesToHex(bytes));
-      setStatus("");
-    } catch {
-      setError("Failed to hash file.");
-      setStatus("");
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const onDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragging(false);
-    if (e.dataTransfer.files[0]) handleFileSelect(e.dataTransfer.files[0]);
-  }, [handleFileSelect]);
-
-  const registerDiscovery = useCallback(async () => {
-    if (!wallet.publicKey || !hashBytes || !file) return;
-    setError("");
-    setRegistering(true);
-    setStatus("Building transaction…");
-    try {
-      const program  = getProgram();
-      const metadata = JSON.stringify({
-        analysis_type: analysisType,
-        ...(toolName     ? { tool: toolName }         : {}),
-        ...(toolVersion  ? { version: toolVersion }   : {}),
-        ...(description  ? { description }            : {}),
-        ...(publicUrl    ? { url: publicUrl }         : {}),
-        ...(orcidId      ? { orcid: orcidId }         : {}),
-        ...(authorEmail  ? { email: authorEmail }     : {}),
-        ...(citedPdas.length > 0 ? { cites: citedPdas } : {}),
-        file_name:       file.name,
-        file_size_bytes: file.size,
-      });
-
-      if (byteLen(metadata) > META_LIMIT) {
-        setError("Metadata too long (> 512 bytes). Shorten description or file name.");
-        setRegistering(false);
-        setStatus("");
-        return;
-      }
-
-      const [pda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("discovery"), wallet.publicKey.toBuffer(), Buffer.from(hashBytes)],
-        PROGRAM_ID
-      );
-
-      setStatus("Waiting for wallet approval…");
-      const txSig = await (program.methods as any)
-        .registerDiscovery(Array.from(hashBytes), metadata)
-        .accounts({ researcher: wallet.publicKey, discoveryRecord: pda, systemProgram: SystemProgram.programId })
-        .rpc({ commitment: "confirmed" });
-
-      setStatus("Confirming…");
-      const record = await (program.account as any).discoveryRecord.fetch(pda);
-      setCertificate({ pda: pda.toBase58(), txSig, fileHash, timestamp: record.timestamp.toNumber(), metadata });
-      setStatus("");
-    } catch (e: any) {
-      setError(e?.message ?? "Transaction failed.");
-      setStatus("");
-    } finally {
-      setRegistering(false);
-    }
-  }, [wallet.publicKey, hashBytes, file, analysisType, toolName, toolVersion, description, fileHash, getProgram]);
-
-  // ── Verify ────────────────────────────────────────────────────────────────
-
-  const handleVerifyFileSelect = useCallback(async (f: File) => {
-    const bytes = await hashFile(f);
-    setVerifyHash(bytesToHex(bytes));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const runVerify = useCallback(async () => {
-    setVerifyError("");
-    setVerifyResult(null);
-    const hashHex = verifyHash.trim().toLowerCase();
-    if (hashHex.length !== 64 || !/^[0-9a-f]+$/.test(hashHex)) {
-      setVerifyError("Paste a valid 64-character hex hash.");
-      return;
-    }
-    let researcherKey: PublicKey;
-    try { researcherKey = new PublicKey(verifyWallet.trim()); }
-    catch { setVerifyError("Invalid wallet address."); return; }
-
-    setVerifying(true);
-    try {
-      const provider = new AnchorProvider(
-        connection,
-        wallet.publicKey ? (wallet as any) : readonlyWallet(researcherKey),
-        { commitment: "confirmed" }
-      );
-      const program = new Program(idl as Idl, provider);
-      const [pda]   = PublicKey.findProgramAddressSync(
-        [Buffer.from("discovery"), researcherKey.toBuffer(), Buffer.from(hashHex, "hex")],
-        PROGRAM_ID
-      );
-      const record = await (program.account as any).discoveryRecord.fetch(pda);
-      setVerifyResult({
-        found: true,
-        pda: pda.toBase58(),
-        researcher: record.researcher.toBase58(),
-        owner: record.owner?.toBase58() ?? record.researcher.toBase58(),
-        timestamp: record.timestamp.toNumber(),
-        metadata: record.metadata,
-        endorsementCount: record.endorsementCount ?? 0,
-        fileHashHex: hashHex,
-      });
-      setTransferTo("");
-      setTransferError("");
-      setTransferDone(false);
-    } catch (e: any) {
-      if (e?.message?.includes("Account does not exist")) setVerifyResult({ found: false });
-      else setVerifyError(e?.message ?? "Verification failed.");
-    } finally {
-      setVerifying(false);
-    }
-  }, [verifyHash, verifyWallet, connection, wallet]);
-
-  // Auto-fetch file from URL in record metadata, hash it, compare to stored hash
-  const fetchAndVerify = useCallback(async (recordUrl: string, storedHash: string, researcherAddr: string) => {
-    setFetchVerifying(true);
-    setVerifyError("");
-    try {
-      const res  = await fetch(recordUrl);
-      if (!res.ok) throw new Error(`Fetch failed: ${res.status} ${res.statusText}`);
-      const buf  = await res.arrayBuffer();
-      const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", buf));
-      const hex  = Array.from(hash).map((x) => x.toString(16).padStart(2, "0")).join("");
-      if (hex !== storedHash) {
-        setVerifyError(`Hash mismatch — file at URL does not match on-chain record.\nExpected: ${storedHash}\nGot: ${hex}`);
-      } else {
-        setVerifyHash(hex);
-        setVerifyWallet(researcherAddr);
-      }
-    } catch (e: any) {
-      setVerifyError(`Could not fetch file: ${e.message}`);
-    } finally {
-      setFetchVerifying(false);
-    }
-  }, []);
-
-  // ── Transfer ownership ────────────────────────────────────────────────────
-
-  const transferDiscovery = useCallback(async () => {
-    if (!wallet.publicKey || !verifyResult?.pda || !verifyResult.researcher) return;
-    let newOwnerKey: PublicKey;
-    try { newOwnerKey = new PublicKey(transferTo.trim()); }
-    catch { setTransferError("Invalid wallet address."); return; }
-
-    setTransferring(true);
-    setTransferError("");
-    try {
-      const program       = getProgram();
-      const hashHex       = verifyHash.trim().toLowerCase();
-      const researcherKey = new PublicKey(verifyResult.researcher);
-      const [pda]         = PublicKey.findProgramAddressSync(
-        [Buffer.from("discovery"), researcherKey.toBuffer(), Buffer.from(hashHex, "hex")],
-        PROGRAM_ID
-      );
-      await (program.methods as any)
-        .transferDiscovery(Array.from(Buffer.from(hashHex, "hex")))
-        .accounts({
-          owner:           wallet.publicKey,
-          newOwner:        newOwnerKey,
-          researcher:      researcherKey,
-          discoveryRecord: pda,
-        })
-        .rpc({ commitment: "confirmed" });
-
-      setTransferDone(true);
-      setVerifyResult((prev) => prev ? { ...prev, owner: newOwnerKey.toBase58() } : prev);
-    } catch (e: any) {
-      setTransferError(e?.message ?? "Transfer failed.");
-    } finally {
-      setTransferring(false);
-    }
-  }, [wallet.publicKey, verifyResult, verifyHash, transferTo, getProgram]);
-
-  // ── Endorse ───────────────────────────────────────────────────────────────
-
-  const endorseDiscovery = useCallback(async () => {
-    if (!wallet.publicKey || !verifyResult?.researcher || !verifyResult.fileHashHex) return;
-    setEndorsing(true);
-    setEndorseError("");
-    try {
-      const program       = getProgram();
-      const hashHex       = verifyResult.fileHashHex;
-      const researcherKey = new PublicKey(verifyResult.researcher);
-      const [pda]         = PublicKey.findProgramAddressSync(
-        [Buffer.from("discovery"), researcherKey.toBuffer(), Buffer.from(hashHex, "hex")],
-        PROGRAM_ID
-      );
-      const [endorsementPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("endorsement"), wallet.publicKey.toBuffer(), pda.toBuffer()],
-        PROGRAM_ID
-      );
-      await (program.methods as any)
-        .endorseDiscovery(Array.from(Buffer.from(hashHex, "hex")))
-        .accounts({
-          endorser:         wallet.publicKey,
-          researcher:       researcherKey,
-          discoveryRecord:  pda,
-          endorsementRecord: endorsementPda,
-          systemProgram:    SystemProgram.programId,
-        })
-        .rpc({ commitment: "confirmed" });
-
-      setEndorseDone(true);
-      setVerifyResult((prev) => prev ? { ...prev, endorsementCount: (prev.endorsementCount ?? 0) + 1 } : prev);
-    } catch (e: any) {
-      setEndorseError(e?.message ?? "Endorsement failed.");
-    } finally {
-      setEndorsing(false);
-    }
-  }, [wallet.publicKey, verifyResult, getProgram]);
-
-  // ── Feed ──────────────────────────────────────────────────────────────────
-
-  const loadFeed = useCallback(async () => {
-    setFeedLoading(true);
-    setFeedError("");
-    setSearchQuery("");
-    try {
-      const pk = wallet.publicKey ?? PublicKey.default;
-      const provider = new AnchorProvider(
-        connection,
-        wallet.publicKey ? (wallet as any) : readonlyWallet(pk),
-        { commitment: "confirmed" }
-      );
-      const program  = new Program(idl as Idl, provider);
-      const accounts = await (program.account as any).discoveryRecord.all();
-      const entries: FeedEntry[] = accounts
-        .map((a: any) => ({
-          pda:              a.publicKey.toBase58(),
-          researcher:       a.account.researcher.toBase58(),
-          owner:            (a.account.owner ?? a.account.researcher).toBase58(),
-          fileHash:         Buffer.from(a.account.fileHash).toString("hex"),
-          timestamp:        a.account.timestamp.toNumber(),
-          metadata:         a.account.metadata,
-          endorsementCount: a.account.endorsementCount ?? 0,
-        }))
-        .sort((a: FeedEntry, b: FeedEntry) => b.timestamp - a.timestamp)
-        .slice(0, 50);
-      setFeedRaw(entries);
-      setFeed(entries);
-    } catch (e: any) {
-      setFeedError(e?.message ?? "Failed to load.");
-    } finally {
-      setFeedLoading(false);
-    }
-  }, [connection, wallet]);
-
-  const runSemanticSearch = useCallback(async () => {
-    if (!searchQuery.trim() || !qvacOnline) return;
-    setSearching(true);
-    try {
-      const res = await fetch(`${QVAC_BASE_URL}/api/search`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ query: searchQuery, discoveries: feedRaw }),
-      });
-      setFeed(await res.json());
-    } catch (e: any) {
-      setFeedError(`AI search failed: ${e.message}`);
-    } finally {
-      setSearching(false);
-    }
-  }, [searchQuery, qvacOnline, feedRaw]);
-
-  useEffect(() => { if (tab === "feed") loadFeed(); }, [tab]); // eslint-disable-line
-
-  // Resolve ORCID name whenever a verify result lands
-  useEffect(() => {
-    setOrcidName("");
-    if (!verifyResult?.metadata) return;
-    const orcid = metaField(verifyResult.metadata, "orcid");
-    if (!orcid) return;
-    resolveOrcid(orcid).then(setOrcidName);
-  }, [verifyResult]);
-
-  // ── Derived ───────────────────────────────────────────────────────────────
-
-  const metaOver  = metadataBytes > META_LIMIT;
-  const metaPct   = Math.min(metadataBytes / META_LIMIT, 1);
-  const fileIsImg = file ? isImageFile(file) : false;
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  const metaOver = reg.metadataBytes > META_LIMIT;
+  const metaPct  = Math.min(reg.metadataBytes / META_LIMIT, 1);
 
   return (
     <div className="app">
@@ -759,14 +55,12 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── Mobile notice ── */}
       {IS_MOBILE && !wallet.connected && (
         <div className="notice">
           <strong>Mobile:</strong> open this URL inside the <strong>Phantom</strong> or <strong>Solflare</strong> app browser, or connect via the button above.
         </div>
       )}
 
-      {/* ── Tabs ── */}
       <div className="tabs-bar">
         {(["register", "verify", "feed"] as Tab[]).map((t) => (
           <button key={t} className={`tab-btn${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
@@ -790,20 +84,20 @@ export default function Dashboard() {
                 <span className="step-label">Select file</span>
               </div>
               <div
-                className={`dropzone${dragging ? " over" : ""}${file ? " has-file" : ""}`}
-                onClick={() => inputRef.current?.click()}
-                onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-                onDragLeave={() => setDragging(false)}
-                onDrop={onDrop}
+                className={`dropzone${reg.dragging ? " over" : ""}${reg.file ? " has-file" : ""}`}
+                onClick={() => reg.inputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); reg.setDragging(true); }}
+                onDragLeave={() => reg.setDragging(false)}
+                onDrop={(e) => { e.preventDefault(); reg.setDragging(false); if (e.dataTransfer.files[0]) reg.handleFileSelect(e.dataTransfer.files[0]); }}
               >
-                <input ref={inputRef} type="file" style={{ display: "none" }}
-                  onChange={(e) => e.target.files?.[0] && handleFileSelect(e.target.files[0])} />
-                {file ? (
+                <input ref={reg.inputRef} type="file" style={{ display: "none" }}
+                  onChange={(e) => e.target.files?.[0] && reg.handleFileSelect(e.target.files[0])} />
+                {reg.file ? (
                   <div className="dropzone-file">
-                    <span className="file-icon">{fileIsImg ? "🖼️" : "📄"}</span>
+                    <span className="file-icon">{reg.fileIsImg ? "🖼️" : "📄"}</span>
                     <div>
-                      <div className="file-name">{file.name}</div>
-                      <div className="file-size">{(file.size / 1024).toFixed(1)} KB{fileIsImg ? " · image" : ""}</div>
+                      <div className="file-name">{reg.file.name}</div>
+                      <div className="file-size">{(reg.file.size / 1024).toFixed(1)} KB{reg.fileIsImg ? " · image" : ""}</div>
                     </div>
                   </div>
                 ) : (
@@ -814,12 +108,11 @@ export default function Dashboard() {
                   </div>
                 )}
               </div>
-              {fileHash && (
+              {reg.fileHash && (
                 <div className="hash-box">
                   <span className="hash-label">SHA-256</span>
-                  <span className="hash-val">{fileHash}</span>
-                  <button className="copy-btn" title="Copy hash"
-                    onClick={() => copy(fileHash, "hash")}>
+                  <span className="hash-val">{reg.fileHash}</span>
+                  <button className="copy-btn" title="Copy hash" onClick={() => copy(reg.fileHash, "hash")}>
                     {copiedKey === "hash" ? "✓" : "⎘"}
                   </button>
                 </div>
@@ -827,44 +120,39 @@ export default function Dashboard() {
             </div>
 
             {/* Step 2 — metadata */}
-            {file && (
+            {reg.file && (
               <div className="step">
                 <div className="step-head">
                   <span className="step-num">2</span>
                   <span className="step-label">Describe your research</span>
                   {qvacOnline && (
                     <div className="step-actions">
-                      {fileIsImg ? (
-                        /* Image file: OCR → AI suggest */
-                        <button className="btn-ai" disabled={ocrRunning || suggesting} onClick={runOcrAndSuggest}>
-                          {ocrRunning
-                            ? <><span className="spin" /> Reading…</>
-                            : suggesting
-                            ? <><span className="spin" /> Thinking…</>
+                      {reg.fileIsImg ? (
+                        <button className="btn-ai" disabled={reg.ocrRunning || reg.suggesting} onClick={reg.runOcrAndSuggest}>
+                          {reg.ocrRunning ? <><span className="spin" /> Reading…</>
+                            : reg.suggesting ? <><span className="spin" /> Thinking…</>
                             : "✦ OCR + AI suggest"}
                         </button>
                       ) : (
-                        /* Non-image: regular AI suggest */
-                        <button className="btn-ai" disabled={suggesting} onClick={() => suggestWithAI()}>
-                          {suggesting ? <><span className="spin" /> Thinking…</> : "✦ Suggest with AI"}
+                        <button className="btn-ai" disabled={reg.suggesting} onClick={() => reg.suggestWithAI()}>
+                          {reg.suggesting ? <><span className="spin" /> Thinking…</> : "✦ Suggest with AI"}
                         </button>
                       )}
                     </div>
                   )}
                 </div>
 
-                {/* OCR result preview */}
-                {ocrText && (
+                {reg.ocrText && (
                   <div className="ocr-preview">
                     <span className="ocr-label">OCR extracted</span>
-                    <span className="ocr-snippet">{ocrText.slice(0, 200)}{ocrText.length > 200 ? "…" : ""}</span>
+                    <span className="ocr-snippet">{reg.ocrText.slice(0, 200)}{reg.ocrText.length > 200 ? "…" : ""}</span>
                   </div>
                 )}
 
                 <div className="fields">
                   <label className="field">
                     <span>Research type</span>
-                    <select value={analysisType} onChange={(e) => setAnalysisType(e.target.value)}>
+                    <select value={reg.analysisType} onChange={(e) => reg.setAnalysisType(e.target.value)}>
                       {ANALYSIS_TYPES.map((t) => (
                         <option key={t} value={t}>{typeLabel(t)}</option>
                       ))}
@@ -874,178 +162,131 @@ export default function Dashboard() {
                   <div className="field-row">
                     <label className="field">
                       <span>Tool / software</span>
-                      <input type="text" value={toolName} placeholder="e.g. Python, R, MATLAB" onChange={(e) => setToolName(e.target.value)} />
+                      <input type="text" value={reg.toolName} placeholder="e.g. Python, R, MATLAB" onChange={(e) => reg.setToolName(e.target.value)} />
                     </label>
                     <label className="field">
                       <span>Version</span>
-                      <input type="text" value={toolVersion} placeholder="e.g. 3.11.0" onChange={(e) => setToolVersion(e.target.value)} />
+                      <input type="text" value={reg.toolVersion} placeholder="e.g. 3.11.0" onChange={(e) => reg.setToolVersion(e.target.value)} />
                     </label>
                   </div>
 
-                  {/* Description with mic button */}
                   <label className="field">
                     <span>Description <span className="field-opt">(optional — any language, translate ↔ EN on-device)</span></span>
                     <div className="desc-row">
-                      <input
-                        type="text"
-                        value={description}
-                        placeholder="One sentence about what this output contains"
-                        onChange={(e) => setDescription(e.target.value)}
-                      />
+                      <input type="text" value={reg.description} placeholder="One sentence about what this output contains"
+                        onChange={(e) => reg.setDescription(e.target.value)} />
                       {qvacOnline && (
                         <>
                           <button
-                            className={`mic-btn${recording ? " recording" : ""}${transcribing ? " transcribing" : ""}`}
-                            title={recording ? "Stop recording" : "Record description (Whisper STT)"}
-                            disabled={transcribing}
-                            onClick={toggleRecording}
+                            className={`mic-btn${reg.recording ? " recording" : ""}${reg.transcribing ? " transcribing" : ""}`}
+                            title={reg.recording ? "Stop recording" : "Record description (Whisper STT)"}
+                            disabled={reg.transcribing}
+                            onClick={reg.toggleRecording}
                           >
-                            {transcribing
-                              ? <span className="spin spin-sm" />
-                              : recording
-                              ? <MicIcon active />
+                            {reg.transcribing ? <span className="spin spin-sm" />
+                              : reg.recording ? <MicIcon active />
                               : <MicIcon />}
                           </button>
-                          {description.trim() && (
-                            <button
-                              className="mic-btn"
-                              title="Translate description to English (on-device)"
-                              disabled={translating}
-                              onClick={translateDescription}
-                            >
-                              {translating ? <span className="spin spin-sm" /> : <TranslateIcon />}
+                          {reg.description.trim() && (
+                            <button className="mic-btn" title="Translate description to English (on-device)"
+                              disabled={reg.translating} onClick={reg.translateDescription}>
+                              {reg.translating ? <span className="spin spin-sm" /> : <TranslateIcon />}
                             </button>
                           )}
                         </>
                       )}
                     </div>
-                    {recording && (
-                      <div className="mic-hint">
-                        <span className="rec-dot" /> Recording… tap again to stop
-                      </div>
-                    )}
-                    {transcribing && (
-                      <div className="mic-hint">Transcribing with Whisper…</div>
-                    )}
+                    {reg.recording    && <div className="mic-hint"><span className="rec-dot" /> Recording… tap again to stop</div>}
+                    {reg.transcribing && <div className="mic-hint">Transcribing with Whisper…</div>}
                   </label>
 
                   <label className="field">
                     <span>Public file URL <span className="field-opt">(optional — lets others auto-verify)</span></span>
                     <div className="desc-row">
-                      <input
-                        type="url"
-                        value={publicUrl}
-                        placeholder="https://ipfs.io/ipfs/… or any direct link"
-                        onChange={(e) => { setPublicUrl(e.target.value); setIpfsCid(""); }}
-                      />
+                      <input type="url" value={reg.publicUrl} placeholder="https://ipfs.io/ipfs/… or any direct link"
+                        onChange={(e) => { reg.setPublicUrl(e.target.value); }} />
                       {qvacOnline && (
-                        <button
-                          className="mic-btn"
-                          title="Pin file to IPFS and fill URL automatically"
-                          disabled={ipfsUploading}
-                          onClick={uploadFileToIpfs}
-                        >
-                          {ipfsUploading ? <span className="spin spin-sm" /> : <IpfsIcon />}
+                        <button className="mic-btn" title="Pin file to IPFS and fill URL automatically"
+                          disabled={reg.ipfsUploading} onClick={reg.uploadFileToIpfs}>
+                          {reg.ipfsUploading ? <span className="spin spin-sm" /> : <IpfsIcon />}
                         </button>
                       )}
                     </div>
-                    {ipfsCid && (
-                      <div className="mic-hint">
-                        Pinned ✓ CID: <span className="mono">{ipfsCid.slice(0, 20)}…</span>
-                      </div>
+                    {reg.ipfsCid && (
+                      <div className="mic-hint">Pinned ✓ CID: <span className="mono">{reg.ipfsCid.slice(0, 20)}…</span></div>
                     )}
                   </label>
 
-                  {/* ORCID + email identity */}
                   <div className="field-row">
                     <label className="field">
                       <span>ORCID iD <span className="field-opt">(optional)</span></span>
-                      <input
-                        type="text"
-                        value={orcidId}
-                        placeholder="0000-0000-0000-0000"
-                        maxLength={19}
+                      <input type="text" value={reg.orcidId} placeholder="0000-0000-0000-0000" maxLength={19}
                         onChange={(e) => {
-                          // auto-insert dashes: XXXX-XXXX-XXXX-XXXX
                           const digits = e.target.value.replace(/[^0-9X]/gi, "");
                           const parts  = digits.match(/.{1,4}/g) ?? [];
-                          setOrcidId(parts.join("-").slice(0, 19));
-                        }}
-                      />
+                          reg.setOrcidId(parts.join("-").slice(0, 19));
+                        }} />
                     </label>
                     <label className="field">
                       <span>Email <span className="field-opt">(optional)</span></span>
-                      <input
-                        type="email"
-                        value={authorEmail}
-                        placeholder="you@institution.edu"
-                        onChange={(e) => setAuthorEmail(e.target.value)}
-                      />
+                      <input type="email" value={reg.authorEmail} placeholder="you@institution.edu"
+                        onChange={(e) => reg.setAuthorEmail(e.target.value)} />
                     </label>
                   </div>
-                  {(orcidId || authorEmail) && (
+                  {(reg.orcidId || reg.authorEmail) && (
                     <div className="identity-hint">
                       Stored on-chain and linked to your wallet signature — verifiable without any external authority.
                     </div>
                   )}
 
-                  {/* Citation input */}
                   <label className="field">
                     <span>Cites <span className="field-opt">(optional — paste certificate PDAs this work builds on)</span></span>
                     <div className="desc-row">
-                      <input
-                        type="text"
-                        className="mono"
-                        value={citeInput}
-                        placeholder="Certificate PDA address"
-                        onChange={(e) => setCiteInput(e.target.value)}
+                      <input type="text" className="mono" value={reg.citeInput} placeholder="Certificate PDA address"
+                        onChange={(e) => reg.setCiteInput(e.target.value)}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter" && citeInput.trim()) {
+                          if (e.key === "Enter" && reg.citeInput.trim()) {
                             try {
-                              new PublicKey(citeInput.trim());
-                              if (!citedPdas.includes(citeInput.trim()))
-                                setCitedPdas((p) => [...p, citeInput.trim()]);
-                              setCiteInput("");
+                              new PublicKey(reg.citeInput.trim());
+                              if (!reg.citedPdas.includes(reg.citeInput.trim()))
+                                reg.setCitedPdas((p) => [...p, reg.citeInput.trim()]);
+                              reg.setCiteInput("");
                             } catch { /* invalid key */ }
                           }
                         }}
                       />
-                      <button
-                        className="mic-btn"
-                        title="Add citation"
-                        disabled={!citeInput.trim()}
+                      <button className="mic-btn" title="Add citation" disabled={!reg.citeInput.trim()}
                         onClick={() => {
                           try {
-                            new PublicKey(citeInput.trim());
-                            if (!citedPdas.includes(citeInput.trim()))
-                              setCitedPdas((p) => [...p, citeInput.trim()]);
-                            setCiteInput("");
+                            new PublicKey(reg.citeInput.trim());
+                            if (!reg.citedPdas.includes(reg.citeInput.trim()))
+                              reg.setCitedPdas((p) => [...p, reg.citeInput.trim()]);
+                            reg.setCiteInput("");
                           } catch { /* invalid */ }
                         }}
                       >+</button>
                     </div>
-                    {citedPdas.length > 0 && (
+                    {reg.citedPdas.length > 0 && (
                       <div className="cite-list">
-                        {citedPdas.map((pda) => (
+                        {reg.citedPdas.map((pda) => (
                           <div key={pda} className="cite-chip">
                             <span className="mono">{truncate(pda, 6)}</span>
-                            <button onClick={() => setCitedPdas((p) => p.filter((x) => x !== pda))}>×</button>
+                            <button onClick={() => reg.setCitedPdas((p) => p.filter((x) => x !== pda))}>×</button>
                           </div>
                         ))}
                       </div>
                     )}
                   </label>
 
-                  {/* Live byte counter */}
                   <div className="meta-counter">
                     <div className="meta-bar">
                       <div className="meta-bar-fill" style={{
                         width: `${metaPct * 100}%`,
-                        background: metaOver ? "#f87171" : metaPct > 0.8 ? "#fbbf24" : "#14f195"
+                        background: metaOver ? "#f87171" : metaPct > 0.8 ? "#fbbf24" : "#14f195",
                       }} />
                     </div>
                     <span className={`meta-count${metaOver ? " over" : ""}`}>
-                      {metadataBytes} / {META_LIMIT} bytes
+                      {reg.metadataBytes} / {META_LIMIT} bytes
                     </span>
                   </div>
                 </div>
@@ -1053,46 +294,43 @@ export default function Dashboard() {
             )}
 
             {/* Step 3 — register */}
-            {hashBytes && (
+            {reg.hashBytes && (
               <div className="step">
                 <div className="step-head">
                   <span className="step-num">3</span>
                   <span className="step-label">Register on Solana</span>
                 </div>
-
                 {!wallet.connected ? (
                   <div className="wallet-prompt">
                     <p>Connect your wallet to sign the transaction.</p>
                     <WalletMultiButton />
                   </div>
                 ) : (
-                  <button className="btn-primary" disabled={registering || metaOver} onClick={registerDiscovery}>
-                    {registering ? <><span className="spin" />{status || "Registering…"}</> : "Register discovery →"}
+                  <button className="btn-primary" disabled={reg.registering || metaOver} onClick={reg.registerDiscovery}>
+                    {reg.registering ? <><span className="spin" />{reg.status || "Registering…"}</> : "Register discovery →"}
                   </button>
                 )}
-
-                {status && !registering && <p className="msg-info">{status}</p>}
-                {error  && <p className="msg-error">{error}</p>}
+                {reg.status && !reg.registering && <p className="msg-info">{reg.status}</p>}
+                {reg.error  && <p className="msg-error">{reg.error}</p>}
               </div>
             )}
 
-            {/* Certificate */}
-            {certificate && (
+            {reg.certificate && (
               <div className="cert">
                 <div className="cert-header">
                   <span className="cert-icon">✓</span>
                   <span>Certificate of Discovery</span>
                 </div>
                 <div className="cert-body">
-                  <CertRow label="Certificate (PDA)" value={certificate.pda} mono
-                    onCopy={() => copy(certificate.pda, "pda")} copied={copiedKey === "pda"} />
+                  <CertRow label="Certificate (PDA)" value={reg.certificate.pda} mono
+                    onCopy={() => copy(reg.certificate!.pda, "pda")} copied={copiedKey === "pda"} />
                   <CertRow label="Transaction"
-                    value={<a href={`https://explorer.solana.com/tx/${certificate.txSig}?cluster=devnet`} target="_blank" rel="noreferrer">{certificate.txSig.slice(0, 20)}… ↗</a>}
-                    onCopy={() => copy(certificate.txSig, "tx")} copied={copiedKey === "tx"} />
-                  <CertRow label="File hash" value={certificate.fileHash} mono
-                    onCopy={() => copy(certificate.fileHash, "cert-hash")} copied={copiedKey === "cert-hash"} />
-                  <CertRow label="Timestamp" value={new Date(certificate.timestamp * 1000).toUTCString()} />
-                  <CertRow label="Metadata" value={renderMeta(certificate.metadata)} />
+                    value={<a href={`https://explorer.solana.com/tx/${reg.certificate.txSig}?cluster=devnet`} target="_blank" rel="noreferrer">{reg.certificate.txSig.slice(0, 20)}… ↗</a>}
+                    onCopy={() => copy(reg.certificate!.txSig, "tx")} copied={copiedKey === "tx"} />
+                  <CertRow label="File hash" value={reg.certificate.fileHash} mono
+                    onCopy={() => copy(reg.certificate!.fileHash, "cert-hash")} copied={copiedKey === "cert-hash"} />
+                  <CertRow label="Timestamp" value={new Date(reg.certificate.timestamp * 1000).toUTCString()} />
+                  <CertRow label="Metadata" value={renderMeta(reg.certificate.metadata)} />
                 </div>
               </div>
             )}
@@ -1108,11 +346,13 @@ export default function Dashboard() {
             <div className="fields">
               <label className="field">
                 <span>Researcher wallet address</span>
-                <input type="text" value={verifyWallet} placeholder="Solana public key" onChange={(e) => setVerifyWallet(e.target.value)} />
+                <input type="text" value={ver.verifyWallet} placeholder="Solana public key"
+                  onChange={(e) => ver.setVerifyWallet(e.target.value)} />
               </label>
               <label className="field">
                 <span>File hash (SHA-256 hex)</span>
-                <input type="text" className="mono" value={verifyHash} placeholder="64-character hex" onChange={(e) => setVerifyHash(e.target.value)} />
+                <input type="text" className="mono" value={ver.verifyHash} placeholder="64-character hex"
+                  onChange={(e) => ver.setVerifyHash(e.target.value)} />
               </label>
             </div>
 
@@ -1120,121 +360,105 @@ export default function Dashboard() {
 
             <div className="dropzone small" onClick={() => verifyFileRef.current?.click()}>
               <input ref={verifyFileRef} type="file" style={{ display: "none" }}
-                onChange={(e) => e.target.files?.[0] && handleVerifyFileSelect(e.target.files[0])} />
+                onChange={(e) => e.target.files?.[0] && ver.handleVerifyFileSelect(e.target.files[0])} />
               <span>↑ Drop file here</span>
             </div>
 
             <button className="btn-primary" style={{ marginTop: "1.25rem" }}
-              disabled={verifying || !verifyHash || !verifyWallet} onClick={runVerify}>
-              {verifying ? <><span className="spin" />Verifying…</> : "Verify →"}
+              disabled={ver.verifying || !ver.verifyHash || !ver.verifyWallet} onClick={ver.runVerify}>
+              {ver.verifying ? <><span className="spin" />Verifying…</> : "Verify →"}
             </button>
 
-            {verifyError && <p className="msg-error">{verifyError}</p>}
+            {ver.verifyError && <p className="msg-error">{ver.verifyError}</p>}
 
-            {verifyResult && (
-              verifyResult.found ? (
+            {ver.verifyResult && (
+              ver.verifyResult.found ? (
                 <div className="cert" style={{ marginTop: "1.5rem" }}>
                   <div className="cert-header valid">
                     <span className="cert-icon">✓</span>
                     <span>Verified on-chain</span>
                   </div>
                   <div className="cert-body">
-                    <CertRow label="Certificate (PDA)" value={verifyResult.pda!} mono
-                      onCopy={() => copy(verifyResult.pda!, "v-pda")} copied={copiedKey === "v-pda"} />
-                    <CertRow label="Researcher" value={verifyResult.researcher!} mono
-                      onCopy={() => copy(verifyResult.researcher!, "v-res")} copied={copiedKey === "v-res"} />
-                    {orcidName && (
+                    <CertRow label="Certificate (PDA)" value={ver.verifyResult.pda!} mono
+                      onCopy={() => copy(ver.verifyResult!.pda!, "v-pda")} copied={copiedKey === "v-pda"} />
+                    <CertRow label="Researcher" value={ver.verifyResult.researcher!} mono
+                      onCopy={() => copy(ver.verifyResult!.researcher!, "v-res")} copied={copiedKey === "v-res"} />
+                    {ver.orcidName && (
                       <CertRow label="Name (ORCID)"
                         value={
-                          <a href={`https://orcid.org/${metaField(verifyResult.metadata!, "orcid")}`}
+                          <a href={`https://orcid.org/${metaField(ver.verifyResult.metadata!, "orcid")}`}
                             target="_blank" rel="noreferrer" className="orcid-link">
-                            {orcidName} ↗
+                            {ver.orcidName} ↗
                           </a>
                         }
                       />
                     )}
-                    {metaField(verifyResult.metadata!, "email") && (
-                      <CertRow label="Email" value={metaField(verifyResult.metadata!, "email")} />
+                    {metaField(ver.verifyResult.metadata!, "email") && (
+                      <CertRow label="Email" value={metaField(ver.verifyResult.metadata!, "email")} />
                     )}
-                    {verifyResult.owner && verifyResult.owner !== verifyResult.researcher && (
-                      <CertRow label="Current owner" value={verifyResult.owner} mono
-                        onCopy={() => copy(verifyResult.owner!, "v-own")} copied={copiedKey === "v-own"} />
+                    {ver.verifyResult.owner && ver.verifyResult.owner !== ver.verifyResult.researcher && (
+                      <CertRow label="Current owner" value={ver.verifyResult.owner} mono
+                        onCopy={() => copy(ver.verifyResult!.owner!, "v-own")} copied={copiedKey === "v-own"} />
                     )}
-                    <CertRow label="Registered" value={new Date(verifyResult.timestamp! * 1000).toUTCString()} />
-                    <CertRow label="Endorsements" value={String(verifyResult.endorsementCount ?? 0)} />
-                    <CertRow label="Metadata" value={renderMeta(verifyResult.metadata!)} />
+                    <CertRow label="Registered" value={new Date(ver.verifyResult.timestamp! * 1000).toUTCString()} />
+                    <CertRow label="Endorsements" value={String(ver.verifyResult.endorsementCount ?? 0)} />
+                    <CertRow label="Metadata" value={renderMeta(ver.verifyResult.metadata!)} />
                   </div>
-                  {/* Auto-verify from URL if researcher included one */}
-                  {metaField(verifyResult.metadata!, "url") && (
+
+                  {metaField(ver.verifyResult.metadata!, "url") && (
                     <div className="fetch-verify-row">
-                      <span className="fetch-verify-hint">
-                        File URL on record —
-                      </span>
-                      <a
-                        href={metaField(verifyResult.metadata!, "url")}
-                        target="_blank" rel="noreferrer"
-                        className="fetch-verify-link"
-                      >
-                        {metaField(verifyResult.metadata!, "url").slice(0, 50)}…
+                      <span className="fetch-verify-hint">File URL on record —</span>
+                      <a href={metaField(ver.verifyResult.metadata!, "url")} target="_blank" rel="noreferrer" className="fetch-verify-link">
+                        {metaField(ver.verifyResult.metadata!, "url").slice(0, 50)}…
                       </a>
-                      <button
-                        className="btn-ai"
-                        disabled={fetchVerifying}
-                        onClick={() => fetchAndVerify(
-                          metaField(verifyResult!.metadata!, "url"),
-                          verifyHash,
-                          verifyResult!.researcher!,
+                      <button className="btn-ai" disabled={ver.fetchVerifying}
+                        onClick={() => ver.fetchAndVerify(
+                          metaField(ver.verifyResult!.metadata!, "url"),
+                          ver.verifyHash,
+                          ver.verifyResult!.researcher!,
                         )}
                       >
-                        {fetchVerifying
-                          ? <><span className="spin" /> Fetching…</>
-                          : "↓ Fetch file & verify hash"}
+                        {ver.fetchVerifying ? <><span className="spin" /> Fetching…</> : "↓ Fetch file & verify hash"}
                       </button>
                     </div>
                   )}
-                  {/* Endorse — shown to any connected wallet that is NOT the owner */}
-                  {wallet.connected && wallet.publicKey?.toBase58() !== (verifyResult.owner ?? verifyResult.researcher) && (
+
+                  {/* Endorse — shown to non-owner connected wallets */}
+                  {wallet.connected && wallet.publicKey?.toBase58() !== (ver.verifyResult.owner ?? ver.verifyResult.researcher) && (
                     <div className="transfer-section">
                       <div className="transfer-header">Peer endorsement</div>
-                      {endorseDone ? (
-                        <p className="msg-info">Endorsement recorded on-chain. Total: {verifyResult.endorsementCount}</p>
+                      {ver.endorseDone ? (
+                        <p className="msg-info">Endorsement recorded on-chain. Total: {ver.verifyResult.endorsementCount}</p>
                       ) : (
                         <>
-                          <button className="btn-primary" disabled={endorsing} onClick={endorseDiscovery}>
-                            {endorsing ? <><span className="spin" />Endorsing…</> : "✦ Endorse this discovery →"}
+                          <button className="btn-primary" disabled={ver.endorsing} onClick={ver.endorseDiscovery}>
+                            {ver.endorsing ? <><span className="spin" />Endorsing…</> : "✦ Endorse this discovery →"}
                           </button>
-                          {endorseError && <p className="msg-error">{endorseError}</p>}
+                          {ver.endorseError && <p className="msg-error">{ver.endorseError}</p>}
                           <p className="transfer-hint">One endorsement per wallet. Stored immutably on-chain.</p>
                         </>
                       )}
                     </div>
                   )}
 
-                  {/* Transfer ownership — only shown to current owner */}
-                  {wallet.connected && wallet.publicKey?.toBase58() === (verifyResult.owner ?? verifyResult.researcher) && (
+                  {/* Transfer — shown to current owner only */}
+                  {wallet.connected && wallet.publicKey?.toBase58() === (ver.verifyResult.owner ?? ver.verifyResult.researcher) && (
                     <div className="transfer-section">
                       <div className="transfer-header">Transfer ownership</div>
-                      {transferDone ? (
-                        <p className="msg-info">Ownership transferred to {transferTo.trim()}.</p>
+                      {ver.transferDone ? (
+                        <p className="msg-info">Ownership transferred to {ver.transferTo.trim()}.</p>
                       ) : (
                         <>
                           <div className="transfer-row">
-                            <input
-                              type="text"
-                              className="mono"
-                              value={transferTo}
+                            <input type="text" className="mono" value={ver.transferTo}
                               placeholder="New owner wallet address"
-                              onChange={(e) => setTransferTo(e.target.value)}
-                            />
-                            <button
-                              className="btn-primary"
-                              disabled={transferring || !transferTo.trim()}
-                              onClick={transferDiscovery}
-                            >
-                              {transferring ? <><span className="spin" />Transferring…</> : "Transfer →"}
+                              onChange={(e) => ver.setTransferTo(e.target.value)} />
+                            <button className="btn-primary" disabled={ver.transferring || !ver.transferTo.trim()}
+                              onClick={ver.transferDiscovery}>
+                              {ver.transferring ? <><span className="spin" />Transferring…</> : "Transfer →"}
                             </button>
                           </div>
-                          {transferError && <p className="msg-error">{transferError}</p>}
+                          {ver.transferError && <p className="msg-error">{ver.transferError}</p>}
                           <p className="transfer-hint">The original researcher is preserved on-chain — only the owner changes.</p>
                         </>
                       )}
@@ -1253,35 +477,35 @@ export default function Dashboard() {
           <div className="pane">
             <div className="feed-top">
               <h2 className="pane-title" style={{ margin: 0 }}>Discoveries</h2>
-              <button className="btn-ghost" onClick={loadFeed} disabled={feedLoading}>
-                {feedLoading ? <><span className="spin spin-sm" />Loading</> : "Refresh"}
+              <button className="btn-ghost" onClick={feed.loadFeed} disabled={feed.feedLoading}>
+                {feed.feedLoading ? <><span className="spin spin-sm" />Loading</> : "Refresh"}
               </button>
             </div>
 
             {qvacOnline && (
               <div className="search-row">
-                <input type="text" className="search-input" value={searchQuery}
+                <input type="text" className="search-input" value={feed.searchQuery}
                   placeholder="AI semantic search — e.g. RNA cancer genomics"
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && runSemanticSearch()} />
-                <button className="btn-ai" disabled={searching || !searchQuery.trim()} onClick={runSemanticSearch}>
-                  {searching ? <span className="spin" /> : "Search"}
+                  onChange={(e) => feed.setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && feed.runSemanticSearch()} />
+                <button className="btn-ai" disabled={feed.searching || !feed.searchQuery.trim()} onClick={feed.runSemanticSearch}>
+                  {feed.searching ? <span className="spin" /> : "Search"}
                 </button>
-                {searchQuery && <button className="btn-ghost" onClick={() => { setSearchQuery(""); setFeed(feedRaw); }}>Clear</button>}
+                {feed.searchQuery && <button className="btn-ghost" onClick={feed.clearSearch}>Clear</button>}
               </div>
             )}
 
-            {feedError && <p className="msg-error">{feedError}</p>}
+            {feed.feedError && <p className="msg-error">{feed.feedError}</p>}
 
-            {feedLoading && feed.length === 0 && (
+            {feed.feedLoading && feed.feed.length === 0 && (
               <div className="feed-empty"><span className="spin spin-lg" /></div>
             )}
-            {!feedLoading && feed.length === 0 && !feedError && (
+            {!feed.feedLoading && feed.feed.length === 0 && !feed.feedError && (
               <div className="feed-empty">No discoveries registered yet.</div>
             )}
 
             <div className="feed-list">
-              {feed.map((entry) => {
+              {feed.feed.map((entry) => {
                 const type = metaField(entry.metadata, "analysis_type");
                 const tool = metaField(entry.metadata, "tool");
                 const ver  = metaField(entry.metadata, "version");
@@ -1338,89 +562,6 @@ export default function Dashboard() {
           </div>
         )}
       </main>
-    </div>
-  );
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function MicIcon({ active }: { active?: boolean }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={active ? "#f87171" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="9" y="2" width="6" height="11" rx="3" />
-      <path d="M5 10a7 7 0 0 0 14 0" />
-      <line x1="12" y1="17" x2="12" y2="22" />
-      <line x1="8"  y1="22" x2="16" y2="22" />
-    </svg>
-  );
-}
-
-function IpfsIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 2L2 7l10 5 10-5-10-5z" />
-      <path d="M2 17l10 5 10-5" />
-      <path d="M2 12l10 5 10-5" />
-    </svg>
-  );
-}
-
-function TranslateIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 8l6 6" />
-      <path d="M4 14l6-6 2-3" />
-      <path d="M2 5h12" />
-      <path d="M7 2h1" />
-      <path d="M22 22l-5-10-5 10" />
-      <path d="M14 18h6" />
-    </svg>
-  );
-}
-
-function CertRow({
-  label, value, mono, onCopy, copied
-}: {
-  label: string; value: any; mono?: boolean; onCopy?: () => void; copied?: boolean;
-}) {
-  return (
-    <div className="cert-row">
-      <span className="cert-key">{label}</span>
-      <span className={`cert-val${mono ? " mono" : ""}`}>{value}</span>
-      {onCopy && (
-        <button className="copy-btn" title="Copy" onClick={onCopy}>
-          {copied ? "✓" : "⎘"}
-        </button>
-      )}
-    </div>
-  );
-}
-
-function FeedMeta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="feed-meta-row">
-      <span className="feed-meta-key">{label}</span>
-      <span className={`feed-meta-val${mono ? " mono" : ""}`}>{value}</span>
-    </div>
-  );
-}
-
-function OrcidInline({ metadata }: { metadata: string }) {
-  const [name, setName] = useState("");
-  const orcid = useMemo(() => { try { return JSON.parse(metadata)?.orcid ?? ""; } catch { return ""; } }, [metadata]);
-
-  useEffect(() => {
-    if (!orcid) return;
-    resolveOrcid(orcid).then(setName);
-  }, [orcid]);
-
-  if (!orcid) return null;
-  return (
-    <div className="feed-meta-row">
-      <span className="feed-meta-key">ORCID</span>
-      <a className="feed-meta-val orcid-link" href={`https://orcid.org/${orcid}`} target="_blank" rel="noreferrer">
-        {name || orcid} ↗
-      </a>
     </div>
   );
 }
