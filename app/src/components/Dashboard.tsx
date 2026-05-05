@@ -79,6 +79,29 @@ interface FeedEntry {
 
 type Tab = "register" | "verify" | "feed";
 
+// ── ORCID public API ─────────────────────────────────────────────────────────
+
+const orcidCache = new Map<string, string>();
+
+async function resolveOrcid(orcidId: string): Promise<string> {
+  if (orcidCache.has(orcidId)) return orcidCache.get(orcidId)!;
+  try {
+    const res  = await fetch(`https://pub.orcid.org/v3.0/${orcidId}/person`, {
+      headers: { Accept: "application/json" },
+      signal:  AbortSignal.timeout(4000),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    const given  = data?.name?.["given-names"]?.value ?? "";
+    const family = data?.name?.["family-name"]?.value ?? "";
+    const name   = [given, family].filter(Boolean).join(" ");
+    orcidCache.set(orcidId, name);
+    return name;
+  } catch {
+    return "";
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function truncate(s: string, n = 8) {
@@ -158,6 +181,8 @@ export default function Dashboard() {
   const [toolVersion, setToolVersion] = useState("");
   const [description, setDescription] = useState("");
   const [publicUrl, setPublicUrl]     = useState("");
+  const [orcidId, setOrcidId]         = useState("");
+  const [authorEmail, setAuthorEmail] = useState("");
   const [status, setStatus]           = useState("");
   const [error, setError]             = useState("");
   const [certificate, setCertificate] = useState<Certificate | null>(null);
@@ -203,6 +228,9 @@ export default function Dashboard() {
   const [citeInput,  setCiteInput]  = useState("");
   const [citedPdas,  setCitedPdas]  = useState<string[]>([]);
 
+  // ── ORCID resolution ──────────────────────────────────────────────────────
+  const [orcidName,  setOrcidName]  = useState("");
+
   // ── Feed state ────────────────────────────────────────────────────────────
   const [feed,        setFeed]        = useState<FeedEntry[]>([]);
   const [feedRaw,     setFeedRaw]     = useState<FeedEntry[]>([]);
@@ -215,15 +243,17 @@ export default function Dashboard() {
   const metadataBytes = useMemo(() => {
     const obj = {
       analysis_type: analysisType,
-      ...(toolName    ? { tool: toolName }       : {}),
-      ...(toolVersion ? { version: toolVersion } : {}),
-      ...(description ? { description }          : {}),
-      ...(publicUrl   ? { url: publicUrl }       : {}),
+      ...(toolName     ? { tool: toolName }         : {}),
+      ...(toolVersion  ? { version: toolVersion }   : {}),
+      ...(description  ? { description }            : {}),
+      ...(publicUrl    ? { url: publicUrl }         : {}),
+      ...(orcidId      ? { orcid: orcidId }         : {}),
+      ...(authorEmail  ? { email: authorEmail }     : {}),
       ...(citedPdas.length > 0 ? { cites: citedPdas } : {}),
       ...(file ? { file_name: file.name, file_size_bytes: file.size } : {}),
     };
     return byteLen(JSON.stringify(obj));
-  }, [analysisType, toolName, toolVersion, description, publicUrl, citedPdas, file]);
+  }, [analysisType, toolName, toolVersion, description, publicUrl, orcidId, authorEmail, citedPdas, file]);
 
   // ── Core helpers ──────────────────────────────────────────────────────────
 
@@ -451,6 +481,8 @@ export default function Dashboard() {
         ...(toolVersion  ? { version: toolVersion }   : {}),
         ...(description  ? { description }            : {}),
         ...(publicUrl    ? { url: publicUrl }         : {}),
+        ...(orcidId      ? { orcid: orcidId }         : {}),
+        ...(authorEmail  ? { email: authorEmail }     : {}),
         ...(citedPdas.length > 0 ? { cites: citedPdas } : {}),
         file_name:       file.name,
         file_size_bytes: file.size,
@@ -692,6 +724,15 @@ export default function Dashboard() {
 
   useEffect(() => { if (tab === "feed") loadFeed(); }, [tab]); // eslint-disable-line
 
+  // Resolve ORCID name whenever a verify result lands
+  useEffect(() => {
+    setOrcidName("");
+    if (!verifyResult?.metadata) return;
+    const orcid = metaField(verifyResult.metadata, "orcid");
+    if (!orcid) return;
+    resolveOrcid(orcid).then(setOrcidName);
+  }, [verifyResult]);
+
   // ── Derived ───────────────────────────────────────────────────────────────
 
   const metaOver  = metadataBytes > META_LIMIT;
@@ -915,6 +956,39 @@ export default function Dashboard() {
                     )}
                   </label>
 
+                  {/* ORCID + email identity */}
+                  <div className="field-row">
+                    <label className="field">
+                      <span>ORCID iD <span className="field-opt">(optional)</span></span>
+                      <input
+                        type="text"
+                        value={orcidId}
+                        placeholder="0000-0000-0000-0000"
+                        maxLength={19}
+                        onChange={(e) => {
+                          // auto-insert dashes: XXXX-XXXX-XXXX-XXXX
+                          const digits = e.target.value.replace(/[^0-9X]/gi, "");
+                          const parts  = digits.match(/.{1,4}/g) ?? [];
+                          setOrcidId(parts.join("-").slice(0, 19));
+                        }}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Email <span className="field-opt">(optional)</span></span>
+                      <input
+                        type="email"
+                        value={authorEmail}
+                        placeholder="you@institution.edu"
+                        onChange={(e) => setAuthorEmail(e.target.value)}
+                      />
+                    </label>
+                  </div>
+                  {(orcidId || authorEmail) && (
+                    <div className="identity-hint">
+                      Stored on-chain and linked to your wallet signature — verifiable without any external authority.
+                    </div>
+                  )}
+
                   {/* Citation input */}
                   <label className="field">
                     <span>Cites <span className="field-opt">(optional — paste certificate PDAs this work builds on)</span></span>
@@ -1069,6 +1143,19 @@ export default function Dashboard() {
                       onCopy={() => copy(verifyResult.pda!, "v-pda")} copied={copiedKey === "v-pda"} />
                     <CertRow label="Researcher" value={verifyResult.researcher!} mono
                       onCopy={() => copy(verifyResult.researcher!, "v-res")} copied={copiedKey === "v-res"} />
+                    {orcidName && (
+                      <CertRow label="Name (ORCID)"
+                        value={
+                          <a href={`https://orcid.org/${metaField(verifyResult.metadata!, "orcid")}`}
+                            target="_blank" rel="noreferrer" className="orcid-link">
+                            {orcidName} ↗
+                          </a>
+                        }
+                      />
+                    )}
+                    {metaField(verifyResult.metadata!, "email") && (
+                      <CertRow label="Email" value={metaField(verifyResult.metadata!, "email")} />
+                    )}
                     {verifyResult.owner && verifyResult.owner !== verifyResult.researcher && (
                       <CertRow label="Current owner" value={verifyResult.owner} mono
                         onCopy={() => copy(verifyResult.owner!, "v-own")} copied={copiedKey === "v-own"} />
@@ -1214,6 +1301,7 @@ export default function Dashboard() {
                     {desc && <p className="feed-desc">{desc}</p>}
                     <div className="feed-meta">
                       <FeedMeta label="Researcher" value={truncate(entry.researcher)} mono />
+                      <OrcidInline metadata={entry.metadata} />
                       <FeedMeta label="Hash" value={truncate(entry.fileHash, 10)} mono />
                       {(tool || ver) && <FeedMeta label="Tool" value={[tool, ver].filter(Boolean).join(" ")} />}
                     </div>
@@ -1313,6 +1401,26 @@ function FeedMeta({ label, value, mono }: { label: string; value: string; mono?:
     <div className="feed-meta-row">
       <span className="feed-meta-key">{label}</span>
       <span className={`feed-meta-val${mono ? " mono" : ""}`}>{value}</span>
+    </div>
+  );
+}
+
+function OrcidInline({ metadata }: { metadata: string }) {
+  const [name, setName] = useState("");
+  const orcid = useMemo(() => { try { return JSON.parse(metadata)?.orcid ?? ""; } catch { return ""; } }, [metadata]);
+
+  useEffect(() => {
+    if (!orcid) return;
+    resolveOrcid(orcid).then(setName);
+  }, [orcid]);
+
+  if (!orcid) return null;
+  return (
+    <div className="feed-meta-row">
+      <span className="feed-meta-key">ORCID</span>
+      <a className="feed-meta-val orcid-link" href={`https://orcid.org/${orcid}`} target="_blank" rel="noreferrer">
+        {name || orcid} ↗
+      </a>
     </div>
   );
 }

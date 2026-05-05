@@ -778,6 +778,22 @@ body {
 
 .meta-count.over { color: #f87171; }
 
+/* ── ORCID / identity ── */
+.orcid-link {
+  color: #a3e635;
+  text-decoration: none;
+  font-size: 0.8rem;
+}
+.orcid-link:hover { text-decoration: underline; }
+
+.identity-hint {
+  font-size: 0.72rem;
+  color: #475569;
+  margin-top: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  border-left: 2px solid #2a2a3e;
+}
+
 /* ── Citation chips ── */
 .cite-list {
   display: flex;
