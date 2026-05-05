@@ -880,6 +880,45 @@ body {
 /* ── Mono util ── */
 .mono { font-family: monospace; font-size: 0.8rem !important; }
 
+/* ── Airdrop button ── */
+.airdrop-btn {
+  font-size: 0.72rem;
+  padding: 0.3rem 0.65rem;
+  color: #14f195;
+  border-color: #14f19540;
+}
+.airdrop-btn:not(:disabled):hover { border-color: #14f195; color: #14f195; }
+
+.airdrop-toast {
+  text-align: center;
+  font-size: 0.75rem;
+  color: #14f195;
+  padding: 0.3rem 1rem;
+  background: #0d1f18;
+  border-bottom: 1px solid #14f19530;
+}
+
+/* ── Share button ── */
+.share-btn {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #1e1e30;
+  border-radius: 6px;
+  color: #64748b;
+  font-size: 0.72rem;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.share-btn:hover { border-color: #9945ff; color: #c4b5fd; }
+
+/* ── Mine filter active state ── */
+.btn-ghost.active {
+  border-color: #9945ff;
+  color: #c4b5fd;
+  background: #9945ff18;
+}
+
 /* ── Mobile ── */
 @media (max-width: 520px) {
   .header-inner { padding: 0.75rem; }

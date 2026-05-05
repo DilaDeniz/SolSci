@@ -11,6 +11,7 @@ export function useFeed(connection: Connection, wallet: WalletContextState, qvac
   const [feedError,   setFeedError]   = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searching,   setSearching]   = useState(false);
+  const [mineOnly,    setMineOnly]    = useState(false);
 
   const loadFeed = useCallback(async () => {
     setFeedLoading(true);
@@ -65,9 +66,24 @@ export function useFeed(connection: Connection, wallet: WalletContextState, qvac
     setFeed(feedRaw);
   }, [feedRaw]);
 
+  const toggleMine = useCallback(() => {
+    setMineOnly((prev) => {
+      const next = !prev;
+      if (next && wallet.publicKey) {
+        const walletStr = wallet.publicKey.toBase58();
+        setFeed(feedRaw.filter((e) => e.researcher === walletStr || e.owner === walletStr));
+      } else {
+        setFeed(feedRaw);
+      }
+      setSearchQuery("");
+      return next;
+    });
+  }, [feedRaw, wallet.publicKey]);
+
   return {
     feed, feedRaw, feedLoading, feedError,
     searchQuery, setSearchQuery, searching,
-    loadFeed, runSemanticSearch, clearSearch,
+    mineOnly,
+    loadFeed, runSemanticSearch, clearSearch, toggleMine,
   };
 }

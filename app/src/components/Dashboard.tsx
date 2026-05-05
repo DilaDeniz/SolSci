@@ -4,7 +4,7 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
 import { IS_MOBILE, META_LIMIT, ANALYSIS_TYPES, QVAC_BASE_URL } from "../lib/constants";
 import type { Tab } from "../lib/constants";
-import { metaField, truncate, typeLabel } from "../lib/utils";
+import { buildShareUrl, metaField, requestAirdrop, truncate, typeLabel } from "../lib/utils";
 import {
   CertRow, FeedMeta, IpfsIcon, MicIcon, OrcidInline,
   TranslateIcon, renderMeta, useCopy,
@@ -19,12 +19,31 @@ export default function Dashboard() {
   const [tab, setTab]  = useState<Tab>("register");
   const { copy, copiedKey } = useCopy();
 
-  const [qvacOnline, setQvacOnline] = useState(false);
+  const [qvacOnline,   setQvacOnline]   = useState(false);
+  const [airdropping,  setAirdropping]  = useState(false);
+  const [airdropMsg,   setAirdropMsg]   = useState("");
+
   useEffect(() => {
     fetch(`${QVAC_BASE_URL}/api/health`, { signal: AbortSignal.timeout(600) })
       .then((r) => setQvacOnline(r.ok))
       .catch(() => setQvacOnline(false));
   }, []);
+
+  const handleAirdrop = async () => {
+    if (!wallet.publicKey) return;
+    setAirdropping(true);
+    setAirdropMsg("");
+    try {
+      await requestAirdrop(connection as any, wallet.publicKey);
+      setAirdropMsg("2 SOL airdrop alındı ✓");
+      setTimeout(() => setAirdropMsg(""), 3000);
+    } catch {
+      setAirdropMsg("Airdrop başarısız — devnet kalabalık, tekrar dene");
+      setTimeout(() => setAirdropMsg(""), 4000);
+    } finally {
+      setAirdropping(false);
+    }
+  };
 
   const reg    = useRegister(connection, wallet, qvacOnline);
   const ver    = useVerify(connection, wallet);
@@ -33,6 +52,18 @@ export default function Dashboard() {
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (tab === "feed") feed.loadFeed(); }, [tab]); // eslint-disable-line
+
+  // Auto-fill verify form from share URL params
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const hash   = params.get("hash");
+    const wallet = params.get("wallet");
+    if (hash && wallet) {
+      ver.setVerifyHash(hash);
+      ver.setVerifyWallet(wallet);
+      setTab("verify");
+    }
+  }, []); // eslint-disable-line
 
   const metaOver = reg.metadataBytes > META_LIMIT;
   const metaPct  = Math.min(reg.metadataBytes / META_LIMIT, 1);
@@ -50,8 +81,14 @@ export default function Dashboard() {
           </div>
           <div className="header-right">
             {qvacOnline && <span className="pill pill-green">AI local</span>}
+            {wallet.connected && (
+              <button className="btn-ghost airdrop-btn" disabled={airdropping} onClick={handleAirdrop} title="Devnet airdrop — 2 SOL">
+                {airdropping ? <><span className="spin spin-sm" /> Airdrop…</> : "⬇ 2 SOL"}
+              </button>
+            )}
             <WalletMultiButton />
           </div>
+          {airdropMsg && <div className="airdrop-toast">{airdropMsg}</div>}
         </div>
       </header>
 
@@ -377,6 +414,13 @@ export default function Dashboard() {
                   <div className="cert-header valid">
                     <span className="cert-icon">✓</span>
                     <span>Verified on-chain</span>
+                    <button className="share-btn" title="Paylaş"
+                      onClick={() => {
+                        const url = buildShareUrl(ver.verifyHash, ver.verifyResult!.researcher!);
+                        navigator.clipboard.writeText(url);
+                      }}>
+                      {copiedKey === "share" ? "✓ Kopyalandı" : "⬡ Paylaş"}
+                    </button>
                   </div>
                   <div className="cert-body">
                     <CertRow label="Certificate (PDA)" value={ver.verifyResult.pda!} mono
@@ -477,9 +521,20 @@ export default function Dashboard() {
           <div className="pane">
             <div className="feed-top">
               <h2 className="pane-title" style={{ margin: 0 }}>Discoveries</h2>
-              <button className="btn-ghost" onClick={feed.loadFeed} disabled={feed.feedLoading}>
-                {feed.feedLoading ? <><span className="spin spin-sm" />Loading</> : "Refresh"}
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                {wallet.connected && (
+                  <button
+                    className={`btn-ghost${feed.mineOnly ? " active" : ""}`}
+                    onClick={feed.toggleMine}
+                    title="Sadece kendi keşiflerini göster"
+                  >
+                    {feed.mineOnly ? "◈ Benimkiler" : "◈ Benimkiler"}
+                  </button>
+                )}
+                <button className="btn-ghost" onClick={feed.loadFeed} disabled={feed.feedLoading}>
+                  {feed.feedLoading ? <><span className="spin spin-sm" />Loading</> : "Refresh"}
+                </button>
+              </div>
             </div>
 
             {qvacOnline && (

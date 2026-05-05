@@ -81,3 +81,18 @@ export function readonlyWallet(pk: PublicKey) {
     signAllTransactions: async (ts: any) => ts,
   };
 }
+
+export async function requestAirdrop(
+  connection: { requestAirdrop: (pk: PublicKey, lamports: number) => Promise<string>; confirmTransaction: (sig: string, commitment: string) => Promise<any> },
+  publicKey: PublicKey,
+): Promise<void> {
+  const sig = await connection.requestAirdrop(publicKey, 2 * 1_000_000_000);
+  await connection.confirmTransaction(sig, "confirmed");
+}
+
+// ── Share URL ─────────────────────────────────────────────────────────────────
+
+export function buildShareUrl(hashHex: string, researcherAddress: string): string {
+  const base = typeof window !== "undefined" ? window.location.origin + window.location.pathname : "";
+  return `${base}?tab=verify&hash=${hashHex}&wallet=${researcherAddress}`;
+}
