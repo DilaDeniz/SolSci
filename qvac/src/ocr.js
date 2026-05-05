@@ -5,6 +5,7 @@
  */
 
 import Qvac from "@qvac/sdk";
+import { ocrQueue } from "./queue.js";
 
 /**
  * Extract all text from an image buffer.
@@ -12,6 +13,10 @@ import Qvac from "@qvac/sdk";
  * @returns {Promise<string>}   Extracted text, blocks joined by newlines.
  */
 export async function extractTextFromImage(imageBuffer) {
+  return ocrQueue.run(() => _extractTextFromImage(imageBuffer));
+}
+
+async function _extractTextFromImage(imageBuffer) {
   const qvac = new Qvac();
   await qvac.loadModel("ocr");
 

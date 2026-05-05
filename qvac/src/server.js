@@ -20,6 +20,7 @@ import { transcribeAudio }       from "./transcribe.js";
 import { extractTextFromImage }  from "./ocr.js";
 import { translateToEnglish }    from "./translate.js";
 import { uploadToIpfs }          from "./ipfs.js";
+import { llmQueue, embedQueue, ocrQueue } from "./queue.js";
 
 const app  = express();
 const PORT = 3001;
@@ -39,7 +40,14 @@ app.use(express.json({ limit: "10mb" }));
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
-app.get("/api/health", (_req, res) => res.json({ ok: true }));
+app.get("/api/health", (_req, res) => res.json({
+  ok:     true,
+  queues: {
+    llm:   llmQueue.size,
+    embed: embedQueue.size,
+    ocr:   ocrQueue.size,
+  },
+}));
 
 // ── Metadata suggestion ───────────────────────────────────────────────────────
 

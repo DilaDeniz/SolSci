@@ -5,6 +5,7 @@
  */
 
 import Qvac from "@qvac/sdk";
+import { llmQueue } from "./queue.js";
 
 /**
  * Transcribe an audio buffer to text.
@@ -12,6 +13,10 @@ import Qvac from "@qvac/sdk";
  * @returns {Promise<string>}   Transcript, or empty string on silence.
  */
 export async function transcribeAudio(audioBuffer) {
+  return llmQueue.run(() => _transcribeAudio(audioBuffer));
+}
+
+async function _transcribeAudio(audioBuffer) {
   const qvac = new Qvac();
   await qvac.loadModel("transcription");
 

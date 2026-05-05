@@ -5,6 +5,7 @@
  */
 
 import Qvac from "@qvac/sdk";
+import { llmQueue } from "./queue.js";
 
 const SYSTEM_PROMPT = `You are a scientific translator. Your job is to translate the user's text into clear, accurate English.
 
@@ -20,7 +21,10 @@ Rules:
  */
 export async function translateToEnglish(text) {
   if (!text || !text.trim()) return "";
+  return llmQueue.run(() => _translateToEnglish(text));
+}
 
+async function _translateToEnglish(text) {
   const qvac = new Qvac();
   await qvac.loadModel("inference");
 

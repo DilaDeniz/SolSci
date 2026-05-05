@@ -7,6 +7,7 @@
 import Qvac from "@qvac/sdk";
 import { readFileSync } from "fs";
 import { basename, extname } from "path";
+import { llmQueue } from "./queue.js";
 
 // Must stay in sync with ANALYSIS_TYPES in app/src/components/Dashboard.tsx
 const ANALYSIS_TYPES = [
@@ -62,8 +63,11 @@ function buildPrompt(fileName, fileSample) {
 
 export async function suggestMetadata(filePath, fileSample) {
   const fileName = basename(filePath);
-  const qvac = new Qvac();
+  return llmQueue.run(() => _suggestMetadata(fileName, fileSample));
+}
 
+async function _suggestMetadata(fileName, fileSample) {
+  const qvac = new Qvac();
   await qvac.loadModel("inference");
 
   let fullText = "";

@@ -5,6 +5,7 @@
  */
 
 import Qvac from "@qvac/sdk";
+import { embedQueue } from "./queue.js";
 
 const SCORE_THRESHOLD = 0.15; // discard near-zero similarity matches
 
@@ -39,7 +40,10 @@ function discoveryText(entry) {
  */
 export async function semanticSearch(query, discoveries) {
   if (!discoveries.length) return [];
+  return embedQueue.run(() => _semanticSearch(query, discoveries));
+}
 
+async function _semanticSearch(query, discoveries) {
   const qvac = new Qvac();
   await qvac.loadModel("embed");
 
