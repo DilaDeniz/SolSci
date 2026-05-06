@@ -4,7 +4,7 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { PublicKey } from "@solana/web3.js";
 import { IS_MOBILE, META_LIMIT, ANALYSIS_TYPES, QVAC_BASE_URL } from "../lib/constants";
 import type { Tab } from "../lib/constants";
-import { buildShareUrl, metaField, requestAirdrop, truncate, typeLabel } from "../lib/utils";
+import { buildShareUrl, bytesToHex, hashFile, metaField, requestAirdrop, truncate, typeLabel } from "../lib/utils";
 import {
   CertRow, FeedMeta, IpfsIcon, MicIcon, OrcidInline,
   TranslateIcon, renderMeta, useCopy,
@@ -49,6 +49,23 @@ export default function Dashboard() {
   const ver    = useVerify(connection, wallet);
   const feed   = useFeed(connection, wallet, qvacOnline);
 
+  const loadDemo = async () => {
+    const content = `sample_id,gene,expression,pvalue,fold_change
+BRCA1_001,BRCA1,12.4,0.0001,2.3
+TP53_002,TP53,8.7,0.003,1.8
+MYC_003,MYC,19.2,0.00005,3.1
+EGFR_004,EGFR,6.1,0.012,1.4
+PTEN_005,PTEN,4.3,0.0008,0.6`;
+    const blob = new Blob([content], { type: "text/csv" });
+    const file = new File([blob], "rna_seq_results_demo.csv", { type: "text/csv" });
+    await reg.handleFileSelect(file);
+    reg.setAnalysisType("rna_sequencing");
+    reg.setToolName("DESeq2");
+    reg.setToolVersion("1.42.0");
+    reg.setDescription("Differential expression analysis of cancer suppressor genes in breast tissue samples");
+    setTab("register");
+  };
+
   const verifyFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (tab === "feed") feed.loadFeed(); }, [tab]); // eslint-disable-line
@@ -81,6 +98,9 @@ export default function Dashboard() {
           </div>
           <div className="header-right">
             {qvacOnline && <span className="pill pill-green">AI local</span>}
+            <button className="btn-demo" onClick={loadDemo} title="Demo veriyi yükle ve formu doldur">
+              ✦ Demo
+            </button>
             {wallet.connected && (
               <button className="btn-ghost airdrop-btn" disabled={airdropping} onClick={handleAirdrop} title="Devnet airdrop — 2 SOL">
                 {airdropping ? <><span className="spin spin-sm" /> Airdrop…</> : "⬇ 2 SOL"}
@@ -447,6 +467,35 @@ export default function Dashboard() {
                     <CertRow label="Registered" value={new Date(ver.verifyResult.timestamp! * 1000).toUTCString()} />
                     <CertRow label="Endorsements" value={String(ver.verifyResult.endorsementCount ?? 0)} />
                     <CertRow label="Metadata" value={renderMeta(ver.verifyResult.metadata!)} />
+                  </div>
+
+                  {/* ── Explorer panel ── */}
+                  <div className="explorer-panel">
+                    <div className="explorer-label">Zincirde Doğrulandı</div>
+                    <div className="explorer-pda">{ver.verifyResult.pda}</div>
+                    <div className="explorer-actions">
+                      <a
+                        className="explorer-btn"
+                        href={`https://explorer.solana.com/address/${ver.verifyResult.pda}?cluster=devnet`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Solana Explorer'da Gör ↗
+                      </a>
+                      <a
+                        className="explorer-btn explorer-btn-ghost"
+                        href={`https://solscan.io/account/${ver.verifyResult.pda}?cluster=devnet`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Solscan ↗
+                      </a>
+                    </div>
+                    <div className="explorer-meta">
+                      <span>Program: <span className="mono">8cmvWB8S…NykbH</span></span>
+                      <span>Network: <span className="pill pill-purple" style={{fontSize:"0.65rem",padding:"0.1rem 0.4rem"}}>devnet</span></span>
+                      <span>{new Date(ver.verifyResult.timestamp! * 1000).toLocaleString("tr-TR")}</span>
+                    </div>
                   </div>
 
                   {metaField(ver.verifyResult.metadata!, "url") && (
