@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { resolveOrcid } from "../lib/utils";
 
 // ── useCopy ───────────────────────────────────────────────────────────────────
@@ -127,4 +127,148 @@ export function renderMeta(metaStr: string) {
   } catch {
     return <span>{metaStr}</span>;
   }
+}
+
+// ── Tutorial ──────────────────────────────────────────────────────────────────
+
+const TUTORIAL_STEPS = [
+  {
+    icon: "📄",
+    title: "Dosyayı seç",
+    desc: "Herhangi bir araştırma çıktısı — CSV, PDF, görsel, kod. Dosya cihazında kalır.",
+  },
+  {
+    icon: "✏️",
+    title: "Açıkla",
+    desc: "Araştırma tipini ve aracını gir. AI ile otomatik doldurabilir veya sesle dikte edebilirsin.",
+  },
+  {
+    icon: "⛓️",
+    title: "Zincire yaz",
+    desc: "Cüzdanınla imzala. SHA-256 hash + metadata Solana'ya yazılır. ~0.001 $ — 400 ms.",
+  },
+  {
+    icon: "✓",
+    title: "Sertifika",
+    desc: "Değiştirilemez zaman damgası. Herkes Verify tab'ından dosyanın orijinal olduğunu kontrol edebilir.",
+  },
+];
+
+export function Tutorial() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="tutorial-wrap">
+      <button className="tutorial-toggle" onClick={() => setOpen((p) => !p)}>
+        {open ? "▲ Nasıl çalışır?" : "▼ Nasıl çalışır?"}
+      </button>
+      {open && (
+        <div className="tutorial-steps">
+          {TUTORIAL_STEPS.map((s, i) => (
+            <div key={i} className="tutorial-step">
+              <div className="tutorial-icon">{s.icon}</div>
+              <div>
+                <div className="tutorial-step-title">{i + 1}. {s.title}</div>
+                <div className="tutorial-step-desc">{s.desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DemoWalkthrough ───────────────────────────────────────────────────────────
+
+const WALK_STEPS = [
+  {
+    duration: 3000,
+    title: "Dosya seçimi",
+    desc: "Araştırma çıktısı yükleniyor. Dosya cihazda kalıyor — sadece SHA-256 parmak izi hesaplanıyor.",
+  },
+  {
+    duration: 3500,
+    title: "Metadata girişi",
+    desc: "Araştırma tipi, araç ve açıklama girildi. AI bu alanları otomatik doldurabilir — hiçbir veri buluta gitmiyor.",
+  },
+  {
+    duration: 3000,
+    title: "Solana'ya kayıt",
+    desc: "Cüzdan imzasıyla hash + metadata zincire yazılıyor. İşlem maliyeti ~0.001 $, süresi 400 ms.",
+  },
+  {
+    duration: 3500,
+    title: "Doğrulama",
+    desc: "Herhangi biri hash + cüzdan adresiyle keşfin değiştirilmediğini saniyeler içinde doğrulayabilir.",
+  },
+  {
+    duration: 3000,
+    title: "Peer endorsement & Feed",
+    desc: "Başka araştırmacılar keşfi imzalar. Tüm keşifler herkese açık feed'de listelenir, AI ile aranabilir.",
+  },
+];
+
+export function DemoWalkthrough({
+  onStep,
+}: {
+  onStep: (step: number) => void;
+}) {
+  const [running, setRunning]   = useState(false);
+  const [step,    setStep]      = useState(-1);
+  const timerRef                = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const advance = useCallback((current: number) => {
+    const next = current + 1;
+    if (next >= WALK_STEPS.length) {
+      setStep(-1);
+      setRunning(false);
+      onStep(-1);
+      return;
+    }
+    setStep(next);
+    onStep(next);
+    timerRef.current = setTimeout(() => advance(next), WALK_STEPS[next].duration);
+  }, [onStep]);
+
+  const start = useCallback(() => {
+    if (running) return;
+    setRunning(true);
+    setStep(0);
+    onStep(0);
+    timerRef.current = setTimeout(() => advance(0), WALK_STEPS[0].duration);
+  }, [running, advance, onStep]);
+
+  const stop = useCallback(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setRunning(false);
+    setStep(-1);
+    onStep(-1);
+  }, [onStep]);
+
+  useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
+
+  if (!running) {
+    return (
+      <button className="btn-walkthrough" onClick={start} title="Demo videosu için otomatik tur">
+        ▶ Walkthrough
+      </button>
+    );
+  }
+
+  const current = WALK_STEPS[step] ?? WALK_STEPS[0];
+  const pct     = ((step + 1) / WALK_STEPS.length) * 100;
+
+  return (
+    <div className="walkthrough-overlay">
+      <div className="walkthrough-card">
+        <div className="walkthrough-progress">
+          <div className="walkthrough-bar" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="walkthrough-counter">{step + 1} / {WALK_STEPS.length}</div>
+        <div className="walkthrough-title">{current.title}</div>
+        <div className="walkthrough-desc">{current.desc}</div>
+        <button className="walkthrough-stop" onClick={stop}>■ Durdur</button>
+      </div>
+    </div>
+  );
 }

@@ -6,8 +6,8 @@ import { IS_MOBILE, META_LIMIT, ANALYSIS_TYPES, QVAC_BASE_URL } from "../lib/con
 import type { Tab } from "../lib/constants";
 import { buildShareUrl, bytesToHex, hashFile, metaField, requestAirdrop, truncate, typeLabel } from "../lib/utils";
 import {
-  CertRow, FeedMeta, IpfsIcon, MicIcon, OrcidInline,
-  TranslateIcon, renderMeta, useCopy,
+  CertRow, DemoWalkthrough, FeedMeta, IpfsIcon, MicIcon, OrcidInline,
+  TranslateIcon, Tutorial, renderMeta, useCopy,
 } from "./ui";
 import { useRegister } from "../hooks/useRegister";
 import { useVerify }   from "../hooks/useVerify";
@@ -50,20 +50,29 @@ export default function Dashboard() {
   const feed   = useFeed(connection, wallet, qvacOnline);
 
   const loadDemo = async () => {
-    const content = `sample_id,gene,expression,pvalue,fold_change
-BRCA1_001,BRCA1,12.4,0.0001,2.3
-TP53_002,TP53,8.7,0.003,1.8
-MYC_003,MYC,19.2,0.00005,3.1
-EGFR_004,EGFR,6.1,0.012,1.4
-PTEN_005,PTEN,4.3,0.0008,0.6`;
-    const blob = new Blob([content], { type: "text/csv" });
-    const file = new File([blob], "rna_seq_results_demo.csv", { type: "text/csv" });
+    const res     = await fetch("/demo/rna_seq_demo.csv");
+    const text    = await res.text();
+    const blob    = new Blob([text], { type: "text/csv" });
+    const file    = new File([blob], "rna_seq_demo.csv", { type: "text/csv" });
     await reg.handleFileSelect(file);
     reg.setAnalysisType("rna_sequencing");
     reg.setToolName("DESeq2");
     reg.setToolVersion("1.42.0");
     reg.setDescription("Differential expression analysis of cancer suppressor genes in breast tissue samples");
     setTab("register");
+  };
+
+  // Walkthrough step handler — drives tab switches in sync with overlay
+  const handleWalkStep = async (step: number) => {
+    if (step === 0) { await loadDemo(); }
+    if (step === 2) { setTab("register"); }
+    if (step === 3) {
+      setTab("verify");
+      // pre-fill verify with demo hash so the form looks ready
+      ver.setVerifyWallet(wallet.publicKey?.toBase58() ?? "");
+    }
+    if (step === 4) { setTab("feed"); feed.loadFeed(); }
+    if (step === -1) { setTab("register"); }
   };
 
   const verifyFileRef = useRef<HTMLInputElement>(null);
@@ -101,6 +110,7 @@ PTEN_005,PTEN,4.3,0.0008,0.6`;
             <button className="btn-demo" onClick={loadDemo} title="Demo veriyi yükle ve formu doldur">
               ✦ Demo
             </button>
+            <DemoWalkthrough onStep={handleWalkStep} />
             {wallet.connected && (
               <button className="btn-ghost airdrop-btn" disabled={airdropping} onClick={handleAirdrop} title="Devnet airdrop — 2 SOL">
                 {airdropping ? <><span className="spin spin-sm" /> Airdrop…</> : "⬇ 2 SOL"}
@@ -133,6 +143,8 @@ PTEN_005,PTEN,4.3,0.0008,0.6`;
           <div className="pane">
             <h2 className="pane-title">Register a discovery</h2>
             <p className="pane-sub">Any research output — data files, code, results, documents, images. The file stays on your device; only its SHA-256 hash is stored on Solana.</p>
+
+            <Tutorial />
 
             {/* Step 1 — file */}
             <div className="step">

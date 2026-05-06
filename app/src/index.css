@@ -1012,3 +1012,141 @@ body {
   .cert-key { min-width: 80px; font-size: 0.65rem; }
   .step-head { flex-wrap: wrap; }
 }
+
+/* ── Tutorial ── */
+.tutorial-wrap {
+  margin-bottom: 1.25rem;
+}
+
+.tutorial-toggle {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 0;
+  letter-spacing: 0.03em;
+  transition: color 0.15s;
+}
+.tutorial-toggle:hover { color: #c4b5fd; }
+
+.tutorial-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+  background: #0d0d1a;
+  border: 1px solid #1e1e30;
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.tutorial-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.tutorial-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+
+.tutorial-step-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  margin-bottom: 0.15rem;
+}
+
+.tutorial-step-desc {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+/* ── Walkthrough button ── */
+.btn-walkthrough {
+  background: none;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.35rem 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.03em;
+}
+.btn-walkthrough:hover { border-color: #9945ff; color: #c4b5fd; }
+
+/* ── Walkthrough overlay ── */
+.walkthrough-overlay {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  width: min(480px, calc(100vw - 2rem));
+  pointer-events: none;
+}
+
+.walkthrough-card {
+  background: #0d0d12;
+  border: 1px solid #9945ff80;
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 8px 32px #9945ff30, 0 2px 8px #00000080;
+  pointer-events: all;
+}
+
+.walkthrough-progress {
+  height: 3px;
+  background: #1e1e30;
+  border-radius: 2px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+}
+
+.walkthrough-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #9945ff, #14f195);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.walkthrough-counter {
+  font-size: 0.67rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #9945ff;
+  margin-bottom: 0.35rem;
+}
+
+.walkthrough-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  margin-bottom: 0.4rem;
+}
+
+.walkthrough-desc {
+  font-size: 0.82rem;
+  color: #94a3b8;
+  line-height: 1.6;
+  margin-bottom: 0.85rem;
+}
+
+.walkthrough-stop {
+  background: none;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #64748b;
+  font-size: 0.7rem;
+  padding: 0.25rem 0.65rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.walkthrough-stop:hover { border-color: #f87171; color: #f87171; }

@@ -1,0 +1,9 @@
+sample_id,gene_symbol,baseMean,log2FoldChange,lfcSE,stat,pvalue,padj,description
+S001,BRCA1,1842.3,2.31,0.14,16.5,1.2e-60,4.8e-58,Breast cancer type 1 susceptibility protein
+S002,TP53,924.7,-1.87,0.21,-8.9,6.3e-19,1.1e-16,Tumor protein p53 — cell cycle regulator
+S003,MYC,3201.1,3.14,0.18,17.4,8.9e-68,7.1e-65,Proto-oncogene MYC — transcription factor
+S004,EGFR,612.4,1.44,0.22,6.5,7.8e-11,8.4e-09,Epidermal growth factor receptor
+S005,PTEN,487.9,-2.05,0.19,-10.8,4.2e-27,1.7e-24,Phosphatase and tensin homolog — tumor suppressor
+S006,VEGFA,2104.6,2.78,0.16,17.4,9.2e-68,7.4e-65,Vascular endothelial growth factor A
+S007,CDH1,331.2,-3.21,0.28,-11.5,1.4e-30,7.0e-28,E-cadherin — epithelial cell adhesion
+S008,PIK3CA,1567.8,1.92,0.17,11.3,1.3e-29,5.8e-27,PI3K catalytic subunit alpha
