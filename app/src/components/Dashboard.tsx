@@ -129,11 +129,13 @@ export default function Dashboard() {
       )}
 
       <div className="tabs-bar">
-        {(["register", "verify", "feed"] as Tab[]).map((t) => (
-          <button key={t} className={`tab-btn${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
-            {t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
-        ))}
+        <div className="tabs-inner">
+          {(["register", "verify", "feed"] as Tab[]).map((t) => (
+            <button key={t} className={`tab-btn${tab === t ? " active" : ""}`} onClick={() => setTab(t)}>
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
       </div>
 
       <main className="main">
