@@ -1,50 +1,23 @@
-/**
- * QVAC translation — convert scientific text to English entirely on-device.
- * Uses the QVAC inference model with a translation-focused system prompt.
- * Accepts any natural language and returns the English equivalent.
- */
-
-import Qvac from "@qvac/sdk";
+import { loadModel, translate, unloadModel, LLAMA_3_2_1B_INST_Q4_0 } from "@qvac/sdk";
 import { llmQueue } from "./queue.js";
 
-const SYSTEM_PROMPT = `You are a scientific translator. Your job is to translate the user's text into clear, accurate English.
-
-Rules:
-- Preserve all scientific terminology, numbers, units, and proper nouns exactly.
-- Output ONLY the English translation — no explanations, no preamble, no quotes.
-- If the input is already in English, return it unchanged.`;
-
-/**
- * Translate arbitrary text to English using the on-device LLM.
- * @param {string} text   Input text in any language.
- * @returns {Promise<string>}  English translation.
- */
 export async function translateToEnglish(text) {
-  if (!text || !text.trim()) return "";
+  if (!text?.trim()) return "";
   return llmQueue.run(() => _translateToEnglish(text));
 }
 
 async function _translateToEnglish(text) {
-  const qvac = new Qvac();
-  await qvac.loadModel("inference");
-
-  let result = "";
+  const modelId = await loadModel({ modelSrc: LLAMA_3_2_1B_INST_Q4_0, modelType: "llm" });
   try {
-    const stream = await qvac.completion({
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user",   content: text.trim() },
-      ],
-      temperature: 0.1,
-      maxTokens:   512,
+    const result = translate({
+      modelId,
+      text:      text.trim(),
+      to:        "en",
+      modelType: "llm",
+      stream:    false,
     });
-
-    for await (const chunk of stream) {
-      result += chunk.content ?? "";
-    }
+    return (await result.text)?.trim() ?? text;
   } finally {
-    await qvac.unloadModel("inference");
+    await unloadModel({ modelId });
   }
-
-  return result.trim();
 }

@@ -1,13 +1,7 @@
-/**
- * QVAC embedding-based semantic search over discovery metadata.
- * Computes cosine similarity between a query embedding and a set of
- * pre-embedded discovery records entirely on-device.
- */
-
-import Qvac from "@qvac/sdk";
+import { loadModel, embed, unloadModel, GTE_LARGE_FP16 } from "@qvac/sdk";
 import { embedQueue } from "./queue.js";
 
-const SCORE_THRESHOLD = 0.15; // discard near-zero similarity matches
+const SCORE_THRESHOLD = 0.15;
 
 function cosine(a, b) {
   let dot = 0, na = 0, nb = 0;
@@ -24,49 +18,52 @@ function discoveryText(entry) {
     const m = JSON.parse(entry.metadata);
     return [
       m.analysis_type?.replace(/_/g, " ") ?? "",
-      m.tool          ?? "",
-      m.version       ?? "",
-      m.description   ?? "",
+      m.tool        ?? "",
+      m.version     ?? "",
+      m.description ?? "",
     ].filter(Boolean).join(" ");
   } catch {
     return entry.metadata ?? "";
   }
 }
 
-/**
- * Rank `discoveries` by semantic similarity to `query`.
- * Returns entries with _score >= SCORE_THRESHOLD, sorted descending.
- * Falls back to the original order if the query produces no results above threshold.
- */
 export async function semanticSearch(query, discoveries) {
   if (!discoveries.length) return [];
   return embedQueue.run(() => _semanticSearch(query, discoveries));
 }
 
 async function _semanticSearch(query, discoveries) {
-  const qvac = new Qvac();
-  await qvac.loadModel("embed");
-
+  const modelId = await loadModel({
+    modelSrc: GTE_LARGE_FP16,
+    modelType: "embeddings",
+  });
   try {
-    const texts   = discoveries.map(discoveryText);
-    const inputs  = [query, ...texts];
-    const vectors = await Promise.all(inputs.map((t) => qvac.embed({ input: t })));
+    const texts = [query, ...discoveries.map(discoveryText)];
 
-    const queryVec = vectors[0];
-    const scored   = discoveries.map((entry, i) => ({
+    // Batch embed all texts at once
+    const { embedding: vectors } = await embed({ modelId, text: texts });
+
+    const queryVec = Array.isArray(vectors[0]) ? vectors[0] : vectors;
+    const docVecs  = Array.isArray(vectors[0]) ? vectors.slice(1) : [];
+
+    // If batch returned flat (single text mode), fall back to sequential
+    if (docVecs.length === 0) {
+      const results = [];
+      for (let i = 0; i < discoveries.length; i++) {
+        const { embedding: dv } = await embed({ modelId, text: discoveryText(discoveries[i]) });
+        results.push({ ...discoveries[i], _score: cosine(queryVec, dv) });
+      }
+      return results.sort((a, b) => b._score - a._score);
+    }
+
+    const scored = discoveries.map((entry, i) => ({
       ...entry,
-      _score: cosine(queryVec, vectors[i + 1]),
+      _score: cosine(queryVec, docVecs[i]),
     }));
 
-    const filtered = scored
-      .filter((e) => e._score >= SCORE_THRESHOLD)
-      .sort((a, b) => b._score - a._score);
-
-    // If nothing clears the threshold, return all sorted by score anyway
-    return filtered.length > 0
-      ? filtered
-      : scored.sort((a, b) => b._score - a._score);
+    const filtered = scored.filter((e) => e._score >= SCORE_THRESHOLD);
+    return (filtered.length > 0 ? filtered : scored).sort((a, b) => b._score - a._score);
   } finally {
-    await qvac.unloadModel("embed");
+    await unloadModel({ modelId });
   }
 }

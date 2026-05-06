@@ -1,37 +1,29 @@
-/**
- * QVAC Whisper speech-to-text.
- * Accepts an audio Buffer (WebM, WAV, MP3, OGG) and returns a transcript string.
- * Everything runs on-device via whispercpp — no audio is ever uploaded.
- */
-
-import Qvac from "@qvac/sdk";
+import { loadModel, transcribe, unloadModel, WHISPER_TINY } from "@qvac/sdk";
 import { llmQueue } from "./queue.js";
 
-/**
- * Transcribe an audio buffer to text.
- * @param {Buffer} audioBuffer  Raw audio bytes from MediaRecorder or a file.
- * @returns {Promise<string>}   Transcript, or empty string on silence.
- */
 export async function transcribeAudio(audioBuffer) {
   return llmQueue.run(() => _transcribeAudio(audioBuffer));
 }
 
 async function _transcribeAudio(audioBuffer) {
-  const qvac = new Qvac();
-  await qvac.loadModel("transcription");
-
+  const modelId = await loadModel({
+    modelSrc: WHISPER_TINY,
+    modelType: "whisper",
+    modelConfig: {
+      audio_format: "f32le",
+      strategy:     "greedy",
+      language:     "auto",
+      translate:    false,
+    },
+  });
   try {
-    const result = await qvac.transcribe({ audio: audioBuffer });
-
-    // SDK may return a plain string or an array of timed segments
-    if (typeof result === "string") {
-      return result.trim();
+    const segments = await transcribe({ modelId, audioChunk: audioBuffer });
+    if (typeof segments === "string") return segments.trim();
+    if (Array.isArray(segments)) {
+      return segments.map((s) => (s.text ?? s.content ?? "").trim()).join(" ").trim();
     }
-    if (Array.isArray(result)) {
-      return result.map((s) => (s.text ?? s.content ?? "").trim()).join(" ").trim();
-    }
-    return String(result ?? "").trim();
+    return String(segments ?? "").trim();
   } finally {
-    await qvac.unloadModel("transcription");
+    await unloadModel({ modelId });
   }
 }
