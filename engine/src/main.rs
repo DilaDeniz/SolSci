@@ -25,8 +25,10 @@ fn cmd_register(args: cli::RegisterArgs) -> Result<()> {
 
     let meta = metadata::DiscoveryMetadata::from_file(
         &args.file,
-        &args.tool_version,
         &args.analysis_type,
+        &args.tool,
+        &args.version,
+        &args.description,
     )?;
     let metadata_json = meta.to_json()?;
     println!("  Metadata : {}", metadata_json);
@@ -95,13 +97,9 @@ fn format_unix(ts: i64) -> String {
         return "1970-01-01T00:00:00Z".to_string();
     }
 
-    let secs_per_min  = 60u64;
-    let secs_per_hour = 3600u64;
-    let secs_per_day  = 86400u64;
-
     let mut remaining = ts as u64;
-    let s = remaining % secs_per_min;  remaining /= secs_per_min;
-    let m = remaining % 60;            remaining /= 60;
+    let s = remaining % 60;  remaining /= 60;
+    let m = remaining % 60;  remaining /= 60;
     let h = remaining % 24;
     let mut days = remaining / 24;
 
@@ -114,14 +112,13 @@ fn format_unix(ts: i64) -> String {
         year += 1;
     }
     loop {
-        let dim = days_in_month(month, year);
-        if days < dim as u64 { break; }
-        days -= dim as u64;
+        let dim = days_in_month(month, year) as u64;
+        if days < dim { break; }
+        days -= dim;
         month += 1;
     }
     day += days as u32;
 
-    let _ = secs_per_day; // suppress unused warning
     format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, h, m, s)
 }
 

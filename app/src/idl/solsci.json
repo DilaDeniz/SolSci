@@ -1,0 +1,270 @@
+{
+  "address": "8cmvWB8SrFvS5fKjsCw4bme9iFVeFCFsbTPKdq9NykbH",
+  "metadata": {
+    "name": "solsci",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "SolSci — on-chain scientific discovery verification protocol"
+  },
+  "instructions": [
+    {
+      "name": "close_discovery",
+      "docs": [
+        "Close a discovery record and return rent to the current owner.",
+        "",
+        "Only the current `owner` can close the record (not necessarily the",
+        "original researcher after a transfer)."
+      ],
+      "discriminator": [68, 228, 43, 231, 210, 107, 157, 241],
+      "accounts": [
+        { "name": "owner", "writable": true, "signer": true },
+        { "name": "researcher" },
+        {
+          "name": "discovery_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              { "kind": "const", "value": [100, 105, 115, 99, 111, 118, 101, 114, 121] },
+              { "kind": "account", "path": "researcher" },
+              { "kind": "arg", "path": "file_hash" }
+            ]
+          }
+        }
+      ],
+      "args": [{ "name": "_file_hash", "type": { "array": ["u8", 32] } }]
+    },
+    {
+      "name": "endorse_discovery",
+      "docs": [
+        "Endorse a discovery as a peer reviewer.",
+        "",
+        "Creates a unique EndorsementRecord PDA keyed by (endorser, discovery_record).",
+        "One endorser can endorse each discovery exactly once."
+      ],
+      "discriminator": [37, 131, 113, 190, 247, 115, 235, 95],
+      "accounts": [
+        { "name": "endorser", "writable": true, "signer": true },
+        { "name": "researcher" },
+        {
+          "name": "discovery_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              { "kind": "const", "value": [100, 105, 115, 99, 111, 118, 101, 114, 121] },
+              { "kind": "account", "path": "researcher" },
+              { "kind": "arg", "path": "file_hash" }
+            ]
+          }
+        },
+        {
+          "name": "endorsement_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              { "kind": "const", "value": [101, 110, 100, 111, 114, 115, 101, 109, 101, 110, 116] },
+              { "kind": "account", "path": "endorser" },
+              { "kind": "account", "path": "discovery_record" }
+            ]
+          }
+        },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [{ "name": "_file_hash", "type": { "array": ["u8", 32] } }]
+    },
+    {
+      "name": "register_discovery",
+      "docs": [
+        "Register a new scientific discovery on-chain.",
+        "",
+        "Creates a PDA keyed by `(researcher, file_hash)`. The registrant becomes",
+        "both the original `researcher` (immutable) and the initial `owner`",
+        "(transferable)."
+      ],
+      "discriminator": [63, 188, 175, 73, 49, 157, 163, 63],
+      "accounts": [
+        { "name": "researcher", "writable": true, "signer": true },
+        {
+          "name": "discovery_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              { "kind": "const", "value": [100, 105, 115, 99, 111, 118, 101, 114, 121] },
+              { "kind": "account", "path": "researcher" },
+              { "kind": "arg", "path": "file_hash" }
+            ]
+          }
+        },
+        { "name": "system_program", "address": "11111111111111111111111111111111" }
+      ],
+      "args": [
+        { "name": "file_hash", "type": { "array": ["u8", 32] } },
+        { "name": "metadata", "type": "string" }
+      ]
+    },
+    {
+      "name": "transfer_discovery",
+      "docs": [
+        "Transfer ownership of a discovery to a new wallet.",
+        "",
+        "The original `researcher` field and `timestamp` are preserved forever —",
+        "only `owner` changes. The current owner must sign."
+      ],
+      "discriminator": [67, 115, 169, 238, 78, 78, 248, 31],
+      "accounts": [
+        { "name": "owner", "writable": true, "signer": true },
+        { "name": "new_owner" },
+        { "name": "researcher" },
+        {
+          "name": "discovery_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              { "kind": "const", "value": [100, 105, 115, 99, 111, 118, 101, 114, 121] },
+              { "kind": "account", "path": "researcher" },
+              { "kind": "arg", "path": "file_hash" }
+            ]
+          }
+        }
+      ],
+      "args": [{ "name": "_file_hash", "type": { "array": ["u8", 32] } }]
+    },
+    {
+      "name": "verify_discovery",
+      "docs": [
+        "Verify an existing discovery record by emitting a `DiscoveryVerified` event.",
+        "",
+        "Read-only in effect — useful for CPI calls from other protocols."
+      ],
+      "discriminator": [165, 40, 125, 103, 133, 125, 85, 103],
+      "accounts": [
+        { "name": "researcher" },
+        {
+          "name": "discovery_record",
+          "pda": {
+            "seeds": [
+              { "kind": "const", "value": [100, 105, 115, 99, 111, 118, 101, 114, 121] },
+              { "kind": "account", "path": "researcher" },
+              { "kind": "arg", "path": "file_hash" }
+            ]
+          }
+        }
+      ],
+      "args": [{ "name": "_file_hash", "type": { "array": ["u8", 32] } }]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "DiscoveryRecord",
+      "discriminator": [245, 152, 169, 214, 121, 7, 209, 179]
+    },
+    {
+      "name": "EndorsementRecord",
+      "discriminator": [185, 29, 215, 246, 202, 74, 79, 11]
+    }
+  ],
+  "events": [
+    {
+      "name": "DiscoveryEndorsed",
+      "discriminator": [164, 0, 236, 117, 218, 14, 166, 27]
+    },
+    {
+      "name": "DiscoveryRegistered",
+      "discriminator": [248, 127, 46, 26, 185, 205, 47, 204]
+    },
+    {
+      "name": "DiscoveryTransferred",
+      "discriminator": [36, 38, 69, 76, 212, 237, 116, 157]
+    },
+    {
+      "name": "DiscoveryVerified",
+      "discriminator": [237, 74, 97, 219, 137, 190, 228, 185]
+    }
+  ],
+  "errors": [
+    { "code": 6000, "name": "MetadataTooLong", "msg": "Metadata string exceeds the 512-byte limit" },
+    { "code": 6001, "name": "MetadataEmpty",   "msg": "Metadata must not be empty" },
+    { "code": 6002, "name": "NotOwner",         "msg": "Only the current owner can perform this action" },
+    { "code": 6003, "name": "CannotEndorseOwn", "msg": "You cannot endorse your own discovery" }
+  ],
+  "types": [
+    {
+      "name": "DiscoveryRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "researcher",        "type": "pubkey" },
+          { "name": "owner",             "type": "pubkey" },
+          { "name": "file_hash",         "type": { "array": ["u8", 32] } },
+          { "name": "timestamp",         "type": "i64" },
+          { "name": "metadata",          "type": "string" },
+          { "name": "bump",              "type": "u8" },
+          { "name": "endorsement_count", "type": "u32" }
+        ]
+      }
+    },
+    {
+      "name": "EndorsementRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "endorser",         "type": "pubkey" },
+          { "name": "discovery_record", "type": "pubkey" },
+          { "name": "timestamp",        "type": "i64" },
+          { "name": "bump",             "type": "u8" }
+        ]
+      }
+    },
+    {
+      "name": "DiscoveryEndorsed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "certificate_id", "type": "pubkey" },
+          { "name": "endorser",       "type": "pubkey" },
+          { "name": "researcher",     "type": "pubkey" },
+          { "name": "timestamp",      "type": "i64" }
+        ]
+      }
+    },
+    {
+      "name": "DiscoveryRegistered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "researcher",     "type": "pubkey" },
+          { "name": "owner",          "type": "pubkey" },
+          { "name": "file_hash",      "type": { "array": ["u8", 32] } },
+          { "name": "timestamp",      "type": "i64" },
+          { "name": "metadata",       "type": "string" },
+          { "name": "certificate_id", "type": "pubkey" }
+        ]
+      }
+    },
+    {
+      "name": "DiscoveryTransferred",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "certificate_id", "type": "pubkey" },
+          { "name": "from",           "type": "pubkey" },
+          { "name": "to",             "type": "pubkey" },
+          { "name": "researcher",     "type": "pubkey" }
+        ]
+      }
+    },
+    {
+      "name": "DiscoveryVerified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "researcher",     "type": "pubkey" },
+          { "name": "owner",          "type": "pubkey" },
+          { "name": "file_hash",      "type": { "array": ["u8", 32] } },
+          { "name": "timestamp",      "type": "i64" },
+          { "name": "metadata",       "type": "string" },
+          { "name": "certificate_id", "type": "pubkey" }
+        ]
+      }
+    }
+  ]
+}

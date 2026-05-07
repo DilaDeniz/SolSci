@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name    = "solsci-engine",
-    about   = "Hash analysis output files and register proofs on Solana",
+    about   = "Hash research output files and register proofs on Solana",
     version
 )]
 pub struct Cli {
@@ -22,17 +22,25 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct RegisterArgs {
-    /// Path to the analysis output file to hash and register.
+    /// Path to the research output file to hash and register.
     #[arg(short, long)]
     pub file: PathBuf,
 
-    /// Analysis type label stored in metadata.
-    #[arg(short, long, default_value = "genomic_analysis")]
+    /// Research type label stored in metadata (e.g. machine_learning, astrophysics).
+    #[arg(short, long, default_value = "experiment")]
     pub analysis_type: String,
 
-    /// Tool identifier in "Name/Version" format (e.g. "BioFastq-A/1.0.0").
-    #[arg(long, default_value = "BioFastq-A/1.0.0")]
-    pub tool_version: String,
+    /// Tool or software used to produce this file (e.g. Python, MATLAB, R).
+    #[arg(long, default_value = "")]
+    pub tool: String,
+
+    /// Tool version string (e.g. 3.11.0).
+    #[arg(long, default_value = "")]
+    pub version: String,
+
+    /// One-sentence description of what this file contains.
+    #[arg(long, default_value = "")]
+    pub description: String,
 
     /// Solana RPC endpoint.
     #[arg(long, default_value = "https://api.devnet.solana.com")]

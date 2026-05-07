@@ -16,8 +16,15 @@ app/.env.local
 *.json
 !package.json
 !app/package.json
+!app/src/idl/solsci.json
 !tsconfig.json
+!qvac/package.json
+!vercel.json
+
+# Test ledger (local validator state)
+test-ledger/
 
 # OS
 .DS_Store
 Thumbs.db
+.vercel

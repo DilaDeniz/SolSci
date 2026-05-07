@@ -6,16 +6,26 @@ pub const MAX_METADATA_LEN: usize = 512;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct DiscoveryMetadata {
-    pub tool:            String,
-    pub version:         String,
     pub analysis_type:   String,
-    pub file_size_bytes: u64,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub tool:            String,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub version:         String,
+    #[serde(skip_serializing_if = "str::is_empty")]
+    pub description:     String,
     pub file_name:       String,
+    pub file_size_bytes: u64,
 }
 
 impl DiscoveryMetadata {
     /// Build metadata from a file path and CLI arguments.
-    pub fn from_file(path: &Path, tool_version: &str, analysis_type: &str) -> Result<Self> {
+    pub fn from_file(
+        path:          &Path,
+        analysis_type: &str,
+        tool:          &str,
+        version:       &str,
+        description:   &str,
+    ) -> Result<Self> {
         let file_size = std::fs::metadata(path)
             .with_context(|| format!("Cannot stat {}", path.display()))?
             .len();
@@ -26,16 +36,13 @@ impl DiscoveryMetadata {
             .unwrap_or("unknown")
             .to_string();
 
-        let (tool, version) = tool_version
-            .split_once('/')
-            .unwrap_or((tool_version, "unknown"));
-
         Ok(Self {
+            analysis_type:   analysis_type.to_string(),
             tool:            tool.to_string(),
             version:         version.to_string(),
-            analysis_type:   analysis_type.to_string(),
-            file_size_bytes: file_size,
+            description:     description.to_string(),
             file_name,
+            file_size_bytes: file_size,
         })
     }
 
@@ -45,7 +52,7 @@ impl DiscoveryMetadata {
         anyhow::ensure!(
             json.len() <= MAX_METADATA_LEN,
             "Metadata is {} bytes — exceeds the {}-byte on-chain limit. \
-             Shorten --analysis-type or --tool-version.",
+             Shorten --description or use a shorter file name.",
             json.len(),
             MAX_METADATA_LEN,
         );
