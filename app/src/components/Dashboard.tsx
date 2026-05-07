@@ -68,8 +68,8 @@ export default function Dashboard() {
     if (step === 2) { setTab("register"); }
     if (step === 3) {
       setTab("verify");
-      // pre-fill verify with demo hash so the form looks ready
       ver.setVerifyWallet(wallet.publicKey?.toBase58() ?? "");
+      if (reg.fileHash) ver.setVerifyHash(reg.fileHash);
     }
     if (step === 4) { setTab("feed"); feed.loadFeed(); }
     if (step === -1) { setTab("register"); }
@@ -451,7 +451,7 @@ export default function Dashboard() {
                     <button className="share-btn" title="Paylaş"
                       onClick={() => {
                         const url = buildShareUrl(ver.verifyHash, ver.verifyResult!.researcher!);
-                        navigator.clipboard.writeText(url);
+                        copy(url, "share");
                       }}>
                       {copiedKey === "share" ? "✓ Kopyalandı" : "⬡ Paylaş"}
                     </button>
@@ -591,7 +591,7 @@ export default function Dashboard() {
                     onClick={feed.toggleMine}
                     title="Sadece kendi keşiflerini göster"
                   >
-                    {feed.mineOnly ? "◈ Benimkiler" : "◈ Benimkiler"}
+                    {feed.mineOnly ? "◈ Mine — show all" : "◈ Mine only"}
                   </button>
                 )}
                 <button className="btn-ghost" onClick={feed.loadFeed} disabled={feed.feedLoading}>
