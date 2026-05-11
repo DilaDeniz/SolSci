@@ -134,23 +134,23 @@ export function renderMeta(metaStr: string) {
 const TUTORIAL_STEPS = [
   {
     icon: "📄",
-    title: "Dosyayı seç",
-    desc: "Herhangi bir araştırma çıktısı — CSV, PDF, görsel, kod. Dosya cihazında kalır.",
+    title: "Select a file",
+    desc: "Any research output — CSV, PDF, image, code. The file stays on your device.",
   },
   {
     icon: "✏️",
-    title: "Açıkla",
-    desc: "Araştırma tipini ve aracını gir. AI ile otomatik doldurabilir veya sesle dikte edebilirsin.",
+    title: "Describe it",
+    desc: "Enter the research type and tool. AI can auto-fill these fields, or use voice dictation.",
   },
   {
     icon: "⛓️",
-    title: "Zincire yaz",
-    desc: "Cüzdanınla imzala. SHA-256 hash + metadata Solana'ya yazılır. ~0.001 $ — 400 ms.",
+    title: "Write to chain",
+    desc: "Sign with your wallet. SHA-256 hash + metadata is written to Solana. ~$0.001 — 400ms.",
   },
   {
     icon: "✓",
-    title: "Sertifika",
-    desc: "Değiştirilemez zaman damgası. Herkes Verify tab'ından dosyanın orijinal olduğunu kontrol edebilir.",
+    title: "Certificate",
+    desc: "Immutable timestamp. Anyone can verify the file is original from the Verify tab.",
   },
 ];
 
@@ -159,7 +159,7 @@ export function Tutorial() {
   return (
     <div className="tutorial-wrap">
       <button className="tutorial-toggle" onClick={() => setOpen((p) => !p)}>
-        {open ? "▲ Nasıl çalışır?" : "▼ Nasıl çalışır?"}
+        {open ? "▲ How it works" : "▼ How it works"}
       </button>
       {open && (
         <div className="tutorial-steps">
@@ -183,28 +183,28 @@ export function Tutorial() {
 const WALK_STEPS = [
   {
     duration: 3000,
-    title: "Dosya seçimi",
-    desc: "Araştırma çıktısı yükleniyor. Dosya cihazda kalıyor — sadece SHA-256 parmak izi hesaplanıyor.",
+    title: "File selection",
+    desc: "Research output loading. The file stays on your device — only the SHA-256 fingerprint is computed.",
   },
   {
     duration: 3500,
-    title: "Metadata girişi",
-    desc: "Araştırma tipi, araç ve açıklama girildi. AI bu alanları otomatik doldurabilir — hiçbir veri buluta gitmiyor.",
+    title: "Metadata",
+    desc: "Research type, tool, and description filled in. AI can auto-fill these fields — no data goes to the cloud.",
   },
   {
     duration: 3000,
-    title: "Solana'ya kayıt",
-    desc: "Cüzdan imzasıyla hash + metadata zincire yazılıyor. İşlem maliyeti ~0.001 $, süresi 400 ms.",
+    title: "Register on Solana",
+    desc: "Hash + metadata written to chain with your wallet signature. Cost ~$0.001, time 400ms.",
   },
   {
     duration: 3500,
-    title: "Doğrulama",
-    desc: "Herhangi biri hash + cüzdan adresiyle keşfin değiştirilmediğini saniyeler içinde doğrulayabilir.",
+    title: "Verification",
+    desc: "Anyone can verify the discovery hasn't been tampered with using just the hash and wallet address.",
   },
   {
     duration: 3000,
     title: "Peer endorsement & Feed",
-    desc: "Başka araştırmacılar keşfi imzalar. Tüm keşifler herkese açık feed'de listelenir, AI ile aranabilir.",
+    desc: "Other researchers endorse the discovery on-chain. All discoveries are listed in a public, AI-searchable feed.",
   },
 ];
 
@@ -249,7 +249,7 @@ export function DemoWalkthrough({
 
   if (!running) {
     return (
-      <button className="btn-walkthrough" onClick={start} title="Demo videosu için otomatik tur">
+      <button className="btn-walkthrough" onClick={start} title="Auto walkthrough for demo recording">
         ▶ Walkthrough
       </button>
     );
@@ -267,7 +267,7 @@ export function DemoWalkthrough({
         <div className="walkthrough-counter">{step + 1} / {WALK_STEPS.length}</div>
         <div className="walkthrough-title">{current.title}</div>
         <div className="walkthrough-desc">{current.desc}</div>
-        <button className="walkthrough-stop" onClick={stop}>■ Durdur</button>
+        <button className="walkthrough-stop" onClick={stop}>■ Stop</button>
       </div>
     </div>
   );
